@@ -17,6 +17,7 @@ import math
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -1215,3 +1216,326 @@ def test_cli_demo_renders_end_to_end(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert (tmp_path / "mix.wav").exists()
     assert "rendered in" in result.stdout
+
+
+# --------------------------------------------------------------------------
+# Codexify service plugin -- the canonical protocol v1.0
+# --------------------------------------------------------------------------
+
+def _plugin_client(tmp_path, monkeypatch):
+    """A TestClient over the service plugin, with the LLM stubbed out.
+
+    The stub matters: without it these tests would call the real provider
+    and take a minute each, and a test suite that needs the network is a
+    test suite that lies about being a test suite.
+    """
+    from fastapi.testclient import TestClient
+
+    from agentdaw import service as service_module
+    from agentdaw.serve import build_app
+
+    monkeypatch.setattr(
+        service_module,
+        "_producer",
+        lambda model=None: (StubProducer(), False),
+    )
+    return TestClient(build_app(out_root=tmp_path / "out"))
+
+
+def _envelope(action, payload=None, protocol_version="1.0", capability="music"):
+    return {
+        "protocol_version": protocol_version,
+        "plugin_id": "agentdaw",
+        "capability": capability,
+        "action": action,
+        "input": payload or {},
+        "context": {"request_id": "req-1", "thread_id": None, "user_id": "u-1"},
+    }
+
+
+def test_service_plugin_health_advertises_its_capability(tmp_path, monkeypatch):
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.get("/health").json()
+
+    assert body["status"] == "ok"
+    assert body["ready"] is True
+    assert body["capability"] == "music"
+    assert "compose" in body["actions"]
+    assert body["protocol_version"] == "1.0"
+
+
+def test_service_plugin_invokes_compose_through_the_canonical_envelope(
+    tmp_path, monkeypatch
+):
+    """Codexify's facade raises unless `ok` is a boolean and `error` is present.
+
+    See `guardian/core/plugins.py::_normalize_response`. A response that
+    omits `error` is not a nicer response; it is a broken plugin.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    response = client.post("/invoke", json=_envelope("compose", {"brief": "a warm pad"}))
+    body = response.json()
+
+    assert response.status_code == 200
+    assert isinstance(body["ok"], bool)
+    assert body["ok"] is True
+    assert body["error"] is None
+    assert body["output"]["spec"]["title"]
+    assert body["output"]["artifacts"]
+
+
+def test_service_plugin_rejects_an_unsupported_capability(tmp_path, monkeypatch):
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post(
+        "/invoke", json=_envelope("compose", {"brief": "x"}, capability="tts")
+    ).json()
+
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_operation"
+    assert body["error"]["retryable"] is False
+
+
+def test_service_plugin_rejects_an_unsupported_action(tmp_path, monkeypatch):
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post("/invoke", json=_envelope("teleport")).json()
+
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_operation"
+
+
+def test_service_plugin_rejects_a_wrong_protocol_version(tmp_path, monkeypatch):
+    """The envelope's protocol_version is checked, not assumed."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post(
+        "/invoke", json=_envelope("compose", {"brief": "x"}, protocol_version="2.0")
+    ).json()
+
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_protocol_version"
+
+
+def test_service_plugin_reports_a_failure_without_crashing(tmp_path, monkeypatch):
+    """A bad input must come back as a structured error, not a 500.
+
+    A missing patch is a `not_found`, not an `unsupported_operation`: the
+    host asked for a real action with a bad argument, and telling it the
+    operation does not exist would send it looking in the wrong place.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post("/invoke", json=_envelope("preview", {"spec": {}})).json()
+
+    assert body["ok"] is False
+    assert body["error"]["code"] == "not_found"
+    assert body["output"] is None
+
+
+def test_service_plugin_async_compose_returns_a_job_that_finishes(
+    tmp_path, monkeypatch
+):
+    """The facade has a 10s invoke ceiling; compose takes far longer.
+
+    So the envelope has to be able to hand back a job handle, and the job
+    has to actually complete.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post(
+        "/invoke",
+        json=_envelope("compose", {"brief": "a warm pad", "mode": "async"}),
+    ).json()
+
+    assert body["ok"] is True
+    job_id = body["output"]["job_id"]
+    assert body["output"]["status"] == "running"
+
+    snapshot = {}
+    for _ in range(200):
+        snapshot = client.get(f"/jobs/{job_id}").json()
+        if snapshot["status"] != "running":
+            break
+        time.sleep(0.05)
+
+    assert snapshot["status"] == "succeeded", snapshot
+    assert snapshot["output"]["spec"]["title"]
+    assert snapshot["error"] is None
+
+
+def test_service_plugin_namespaces_artifacts_by_thread(tmp_path, monkeypatch):
+    """The envelope carries a thread_id; artifacts should land under it."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    envelope = _envelope("compose", {"brief": "a warm pad"})
+    envelope["context"]["thread_id"] = "42"
+    body = client.post("/invoke", json=envelope).json()
+
+    assert body["ok"] is True
+    stems = [a for a in body["output"]["artifacts"] if a["role"] == "stem"]
+    assert stems, "compose should produce stems"
+    assert all("/42/" in a["path"] for a in stems), stems
+
+
+def test_approve_writes_a_library_that_did_not_exist_yet(tmp_path, monkeypatch):
+    """Approving on a fresh install must actually persist.
+
+    Reading the library and writing it are different questions: the file
+    may not exist yet, and conflating the two made approve a silent no-op.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    spec = client.post(
+        "/invoke", json=_envelope("compose", {"brief": "a warm pad"})
+    ).json()["output"]["spec"]
+
+    library = tmp_path / "fresh-library.json"
+    assert not library.exists()
+
+    body = client.post(
+        "/invoke",
+        json=_envelope(
+            "approve", {"spec": spec, "library_path": str(library)}
+        ),
+    ).json()
+
+    assert body["ok"] is True
+    assert library.exists(), "approve must create the library file"
+    saved = json.loads(library.read_text(encoding="utf-8"))
+    assert saved["entries"], "the approved patches should be in there"
+
+
+def test_the_router_compose_writes_where_the_host_asked(tmp_path, monkeypatch):
+    """The host owns the output directory; the adapter must honour it."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    out_dir = tmp_path / "host-owned"
+    body = client.post(
+        "/api/music/compose",
+        json={"brief": "a warm pad", "out_dir": str(out_dir)},
+    ).json()
+
+    assert body["artifacts"]
+    assert all(
+        str(out_dir) in a["path"] for a in body["artifacts"] if a
+    ), body["artifacts"]
+    assert (out_dir / "mix.wav").exists()
+
+
+def test_the_openapi_schema_gives_every_route_a_request_body():
+    """Codexify derives its model-callable tools from this schema.
+
+    So the schema is not documentation, it is the contract the model reads
+    before it calls anything. A route whose parameters were demoted to
+    query parameters still appears in the schema -- it just looks wrong
+    to the model, and every call 422s. Asserting on the schema catches
+    that class of bug without needing to know it happened.
+    """
+    from fastapi import FastAPI
+
+    from agentdaw.codexify.router import build_router
+
+    app = FastAPI()
+    app.include_router(build_router())
+    schema = app.openapi()
+    components = schema.get("components", {}).get("schemas", {})
+
+    def _resolve(body):
+        """Follow a $ref into the component schemas."""
+        ref = body.get("$ref")
+        if not ref:
+            return body
+        name = ref.rsplit("/", 1)[-1]
+        return components.get(name, body)
+
+    for path, methods in schema["paths"].items():
+        for method, operation in methods.items():
+            if method not in {"get", "post", "put", "patch", "delete"}:
+                continue
+            if method == "get":
+                # A GET legitimately carries its arguments in the query
+                # string; that is not the bug this test is about.
+                continue
+            assert "requestBody" in operation, f"{method.upper()} {path} has no body"
+            body = _resolve(
+                operation["requestBody"]["content"]["application/json"]["schema"]
+            )
+            assert body.get("type") == "object", f"{method.upper()} {path}"
+            assert body.get("properties"), f"{method.upper()} {path} has an empty body"
+
+            # Nothing was demoted into the query string on the way.
+            for parameter in operation.get("parameters", []):
+                assert parameter["in"] != "query", (
+                    f"{method.upper()} {path} exposes {parameter['name']} as a "
+                    "query parameter; the request body was lost"
+                )
+
+
+def test_the_skill_says_to_measure_rather_than_opine():
+    """The skill is the conduct that goes with the capability."""
+    skill = (
+        Path(__file__).resolve().parents[1]
+        / "agentdaw"
+        / "codexify"
+        / "skills"
+        / "music-producer"
+        / "SKILL.md"
+    )
+    body = skill.read_text(encoding="utf-8").partition("---")[2].partition("---")[2]
+
+    lowered = body.lower()
+    assert "lufs" in lowered or "measure" in lowered
+    assert "retrieve" in lowered, "the skill should tell the model to retrieve first"
+
+
+def test_the_plugin_manifest_agrees_with_the_service():
+    """Codexify advertises capabilities from the manifest and calls them.
+
+    If the manifest names an action the service refuses, the host is told
+    a capability exists and then gets `unsupported_operation` when it
+    reaches for it. The manifest and the implementation are two halves of
+    one contract, so they are checked against each other.
+    """
+    from agentdaw.serve import ACTIONS
+
+    manifest_path = (
+        Path(__file__).resolve().parents[1]
+        / "agentdaw"
+        / "codexify"
+        / "plugins"
+        / "agentdaw"
+        / "manifest.json"
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+    assert manifest["schema_version"] == "1.0"
+    assert manifest["id"] == "agentdaw"
+
+    declared = sorted(
+        f"{capability['id']}.{action}"
+        for capability in manifest["capabilities"]
+        for action in capability["actions"]
+    )
+    assert declared == sorted(f"music.{action}" for action in ACTIONS)
+
+    # Codexify's PluginManifest validates base_url as http/https with a
+    # host and no path, query or fragment.
+    base_url = manifest["base_url"]
+    assert base_url.startswith(("http://", "https://"))
+    assert "/" not in base_url[len("http://"):].strip("/")
+
+
+def test_the_service_rejects_an_action_it_does_not_implement(tmp_path, monkeypatch):
+    """The advertised set is closed: an unknown action is refused, not guessed."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post("/invoke", json=_envelope("render_backwards")).json()
+
+    assert body["ok"] is False
+    assert body["error"]["code"] == "unsupported_operation"
+
+
+

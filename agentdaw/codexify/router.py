@@ -28,17 +28,95 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel, Field
+
 from .. import service
 
 DEFAULT_LIBRARY = Path.home() / ".agentdaw" / "patch-library.json"
 
 
 def _library_path(library: str | None) -> str | None:
+    """The library to *read* from. None means there is nothing to read yet."""
     if library:
         return library
     if DEFAULT_LIBRARY.exists():
         return str(DEFAULT_LIBRARY)
     return None
+
+
+def _library_save_path(library: str | None) -> str:
+    """The library to *write* to.
+
+    Approving a patch must work on a machine that has never approved one
+    before, so the write target is the default path even when no file
+    exists there yet. Reading and writing therefore have different
+    answers, and conflating them made approve a silent no-op on a fresh
+    install.
+    """
+    return library or str(DEFAULT_LIBRARY)
+
+
+class ComposeRequest(BaseModel):
+    """The Artist's brief, in the Artist's words.
+
+    Describe the music you want: mood, tempo, instrumentation, how it
+    should move, how long it should be. Tempo, key, bar count and
+    length stated here are treated as locked and will not be
+    reinterpreted. Do not pass DSP values -- the engine owns those.
+    """
+
+    brief: str = Field(
+        ...,
+        description="The artist's description, in plain words. Not DSP parameters.",
+    )
+    library: str | None = Field(
+        default=None, description="Path to the approved patch library JSON."
+    )
+    render: bool = Field(
+        default=True, description="Also render stems, MIDI and the project."
+    )
+    out_dir: str | None = Field(
+        default=None,
+        description=(
+            "Directory to write artifacts into. The host controls this so the "
+            "rendered files land where its own registry can see them."
+        ),
+    )
+
+
+class ReviseRequest(BaseModel):
+    """A correction to an existing session."""
+
+    spec: dict[str, Any] = Field(..., description="The existing session spec.")
+    feedback: str = Field(
+        ..., description="What the artist wants changed, in plain words."
+    )
+    library: str | None = None
+
+
+class PreviewRequest(BaseModel):
+    """A fast audition of one patch."""
+
+    spec: dict[str, Any] = Field(..., description="The session spec.")
+    patch_id: str = Field(..., description="Which patch to audition.")
+
+
+class RenderRequest(BaseModel):
+    """A full render of a spec."""
+
+    spec: dict[str, Any] = Field(..., description="The session spec.")
+    out_dir: str | None = None
+
+
+class ApproveRequest(BaseModel):
+    """Promote a session's patches into the approved library."""
+
+    spec: dict[str, Any] = Field(..., description="The session spec.")
+    measurements: dict[str, dict[str, float]] | None = Field(
+        default=None,
+        description="Per-track measurements, keyed by track id.",
+    )
+    library: str | None = None
 
 
 def build_router(prefix: str = "/api/music"):
@@ -47,60 +125,18 @@ def build_router(prefix: str = "/api/music"):
     Returns a FastAPI ``APIRouter``. The caller mounts it the way
     Codexify mounts its own routers, through ``_include_router`` with a
     label that exists in the active supported profile.
+
+    The request models live at module scope, not inside this function, and
+    that is load-bearing rather than stylistic. This module uses
+    ``from __future__ import annotations``, so every annotation is a
+    *string* at runtime; FastAPI resolves those strings against the
+    defining module's globals. A model defined inside a function is not
+    in those globals, so the annotation cannot be resolved, FastAPI falls
+    back to treating the argument as a query parameter, and every request
+    comes back 422. The symptom is silent -- the route exists, the
+    OpenAPI schema is wrong, and nothing tells you why.
     """
     from fastapi import APIRouter, HTTPException
-    from pydantic import BaseModel, Field
-
-    class ComposeRequest(BaseModel):
-        """The Artist's brief, in the Artist's words.
-
-        Describe the music you want: mood, tempo, instrumentation, how it
-        should move, how long it should be. Tempo, key, bar count and
-        length stated here are treated as locked and will not be
-        reinterpreted. Do not pass DSP values -- the engine owns those.
-        """
-
-        brief: str = Field(
-            ...,
-            description="The artist's description, in plain words. Not DSP parameters.",
-        )
-        library: str | None = Field(
-            default=None, description="Path to the approved patch library JSON."
-        )
-        render: bool = Field(
-            default=True, description="Also render stems, MIDI and the project."
-        )
-
-    class ReviseRequest(BaseModel):
-        """A correction to an existing session."""
-
-        spec: dict[str, Any] = Field(..., description="The existing session spec.")
-        feedback: str = Field(
-            ..., description="What the artist wants changed, in plain words."
-        )
-        library: str | None = None
-
-    class PreviewRequest(BaseModel):
-        """A fast audition of one patch."""
-
-        spec: dict[str, Any] = Field(..., description="The session spec.")
-        patch_id: str = Field(..., description="Which patch to audition.")
-
-    class RenderRequest(BaseModel):
-        """A full render of a spec."""
-
-        spec: dict[str, Any] = Field(..., description="The session spec.")
-        out_dir: str | None = None
-
-    class ApproveRequest(BaseModel):
-        """Promote a session's patches into the approved library."""
-
-        spec: dict[str, Any] = Field(..., description="The session spec.")
-        measurements: dict[str, dict[str, float]] | None = Field(
-            default=None,
-            description="Per-track measurements, keyed by track id.",
-        )
-        library: str | None = None
 
     router = APIRouter(prefix=prefix, tags=["music"])
 
@@ -119,6 +155,7 @@ def build_router(prefix: str = "/api/music"):
             return service.compose_session(
                 req.brief,
                 library=_library_path(req.library),
+                out_dir=req.out_dir,
                 render=req.render,
             )
         except Exception as exc:
@@ -190,11 +227,14 @@ def build_router(prefix: str = "/api/music"):
         summary="Promote a session's patches into the approved library",
     )
     def approve(req: ApproveRequest) -> dict[str, Any]:
-        return service.approve_patches(
-            req.spec,
-            measurements=req.measurements,
-            library=_library_path(req.library),
-            library_path=_library_path(req.library),
-        )
+        try:
+            return service.approve_patches(
+                req.spec,
+                measurements=req.measurements,
+                library=_library_path(req.library),
+                library_path=_library_save_path(req.library),
+            )
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return router

@@ -1,0 +1,261 @@
+{
+  "$defs": {
+    "LfoSpec": {
+      "properties": {
+        "rate": {
+          "default": 0.3,
+          "description": "0 = very slow, 1 = fast.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Rate",
+          "type": "number"
+        },
+        "depth": {
+          "default": 0.2,
+          "description": "How far the LFO pushes its target.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Depth",
+          "type": "number"
+        },
+        "target": {
+          "default": "filter",
+          "enum": [
+            "filter",
+            "pitch",
+            "amp",
+            "pan"
+          ],
+          "title": "Target",
+          "type": "string"
+        },
+        "shape": {
+          "default": "sine",
+          "enum": [
+            "sine",
+            "triangle",
+            "saw"
+          ],
+          "title": "Shape",
+          "type": "string"
+        }
+      },
+      "title": "LfoSpec",
+      "type": "object"
+    },
+    "Macros": {
+      "description": "Six semantic timbre axes. Pure function of these -> concrete params.",
+      "properties": {
+        "body": {
+          "default": 0.5,
+          "description": "Low-end fullness and resonance. Low = hollow and thin, high = full and solid.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Body",
+          "type": "number"
+        },
+        "brightness": {
+          "default": 0.5,
+          "description": "Spectral brightness. Low = dark and muffled, high = present and cutting.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "motion": {
+          "default": 0.4,
+          "description": "Amount of movement over time: LFO rate and depth, plus filter-envelope travel.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Motion",
+          "type": "number"
+        },
+        "grit": {
+          "default": 0.2,
+          "description": "Saturation and harmonic distortion.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Grit",
+          "type": "number"
+        },
+        "space": {
+          "default": 0.4,
+          "description": "Reverb, delay and chorus depth.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Space",
+          "type": "number"
+        },
+        "size": {
+          "default": 0.5,
+          "description": "Stereo width and unison detune. High = wide and thick, low = mono and focused.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Size",
+          "type": "number"
+        }
+      },
+      "title": "Macros",
+      "type": "object"
+    },
+    "Partial": {
+      "properties": {
+        "n": {
+          "description": "Harmonic number. 1 is the fundamental.",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "N",
+          "type": "integer"
+        },
+        "amp": {
+          "description": "Relative amplitude of this harmonic.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Amp",
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "amp"
+      ],
+      "title": "Partial",
+      "type": "object"
+    },
+    "ShapeSpec": {
+      "description": "Envelope shape expressed as feel, not seconds.",
+      "properties": {
+        "attack": {
+          "default": 0.3,
+          "description": "0 = instant, 1 = very slow swell.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Attack",
+          "type": "number"
+        },
+        "decay": {
+          "default": 0.4,
+          "description": "0 = sharp drop, 1 = long decay.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Decay",
+          "type": "number"
+        },
+        "sustain": {
+          "default": 0.7,
+          "description": "0 = decaying to silence, 1 = fully held.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Sustain",
+          "type": "number"
+        },
+        "release": {
+          "default": 0.5,
+          "description": "0 = cut off, 1 = long tail.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Release",
+          "type": "number"
+        }
+      },
+      "title": "ShapeSpec",
+      "type": "object"
+    },
+    "SpectrumSpec": {
+      "description": "How the oscillator's wavetable is built.\n\nThe engine never sees a wave. It sees a description of the harmonic\ncontent and synthesizes the table. This is the domain the LLM is\ngenuinely good at.",
+      "properties": {
+        "brightness": {
+          "default": 0.5,
+          "description": "How many harmonics are present at all.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "odd_emphasis": {
+          "default": 0.0,
+          "description": "Positive favors odd harmonics (hollow, clarinet-like). Negative favors even (hollow, nasal).",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Odd Emphasis",
+          "type": "number"
+        },
+        "even_emphasis": {
+          "default": 0.0,
+          "description": "Positive favors even harmonics.",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Even Emphasis",
+          "type": "number"
+        },
+        "tilt": {
+          "default": 0.0,
+          "description": "Spectral tilt. Negative = darker (fast rolloff), positive = brighter (slow rolloff).",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Tilt",
+          "type": "number"
+        },
+        "formant": {
+          "default": 0.0,
+          "description": "Resonant formant emphasis somewhere in the harmonic series.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Formant",
+          "type": "number"
+        },
+        "partials": {
+          "description": "Optional explicit partials. When present they override the derived spectrum.",
+          "items": {
+            "$ref": "#/$defs/Partial"
+          },
+          "title": "Partials",
+          "type": "array"
+        }
+      },
+      "title": "SpectrumSpec",
+      "type": "object"
+    }
+  },
+  "description": "A deployable instrument preset.\n\nThe whole point: this is a portable, editable, re-generatable\ndescription -- not a rendered blob. Ship the spec alongside the stems\nand the MIDI and the user can retune it anywhere.",
+  "properties": {
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "name": {
+      "title": "Name",
+      "type": "string"
+    },
+    "description": {
+      "default": "",
+      "title": "Description",
+      "type": "string"
+    },
+    "macros": {
+      "$ref": "#/$defs/Macros"
+    },
+    "spectrum": {
+      "$ref": "#/$defs/SpectrumSpec"
+    },
+    "shape": {
+      "$ref": "#/$defs/ShapeSpec"
+    },
+    "lfo": {
+      "$ref": "#/$defs/LfoSpec"
+    },
+    "seed": {
+      "default": 0,
+      "description": "Pinned for reproducibility. Changing it yields a deliberate variation, never a silent one.",
+      "minimum": 0,
+      "title": "Seed",
+      "type": "integer"
+    }
+  },
+  "required": [
+    "id",
+    "name"
+  ],
+  "title": "PatchSpec",
+  "type": "object"
+}

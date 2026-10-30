@@ -1,0 +1,612 @@
+{
+  "$defs": {
+    "ArrangementSection": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "bars": {
+          "minimum": 1,
+          "title": "Bars",
+          "type": "integer"
+        },
+        "energy": {
+          "default": 0.5,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Energy",
+          "type": "number"
+        },
+        "layers": {
+          "description": "Track ids active in this section.",
+          "items": {
+            "type": "string"
+          },
+          "title": "Layers",
+          "type": "array"
+        },
+        "note": {
+          "default": "",
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "bars"
+      ],
+      "title": "ArrangementSection",
+      "type": "object"
+    },
+    "Brief": {
+      "description": "The success contract the Producer posts before any tool runs.\n\nForces alignment, and makes the Artist's corrections surgical: you\nedit the `locked` line and everything downstream stays put.",
+      "properties": {
+        "goal": {
+          "default": "",
+          "title": "Goal",
+          "type": "string"
+        },
+        "deliverable": {
+          "default": "",
+          "title": "Deliverable",
+          "type": "string"
+        },
+        "tempo": {
+          "default": "",
+          "title": "Tempo",
+          "type": "string"
+        },
+        "layers": {
+          "default": "",
+          "title": "Layers",
+          "type": "string"
+        },
+        "midi_audio": {
+          "default": "",
+          "title": "Midi Audio",
+          "type": "string"
+        },
+        "length": {
+          "default": "",
+          "title": "Length",
+          "type": "string"
+        },
+        "energy": {
+          "default": "",
+          "title": "Energy",
+          "type": "string"
+        },
+        "structure": {
+          "default": "",
+          "title": "Structure",
+          "type": "string"
+        },
+        "movement": {
+          "default": "",
+          "title": "Movement",
+          "type": "string"
+        },
+        "production": {
+          "default": "",
+          "title": "Production",
+          "type": "string"
+        },
+        "variations": {
+          "default": "",
+          "title": "Variations",
+          "type": "string"
+        },
+        "locked": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Locked",
+          "type": "array"
+        },
+        "source": {
+          "default": "",
+          "title": "Source",
+          "type": "string"
+        }
+      },
+      "title": "Brief",
+      "type": "object"
+    },
+    "LfoSpec": {
+      "properties": {
+        "rate": {
+          "default": 0.3,
+          "description": "0 = very slow, 1 = fast.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Rate",
+          "type": "number"
+        },
+        "depth": {
+          "default": 0.2,
+          "description": "How far the LFO pushes its target.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Depth",
+          "type": "number"
+        },
+        "target": {
+          "default": "filter",
+          "enum": [
+            "filter",
+            "pitch",
+            "amp",
+            "pan"
+          ],
+          "title": "Target",
+          "type": "string"
+        },
+        "shape": {
+          "default": "sine",
+          "enum": [
+            "sine",
+            "triangle",
+            "saw"
+          ],
+          "title": "Shape",
+          "type": "string"
+        }
+      },
+      "title": "LfoSpec",
+      "type": "object"
+    },
+    "Macros": {
+      "description": "Six semantic timbre axes. Pure function of these -> concrete params.",
+      "properties": {
+        "body": {
+          "default": 0.5,
+          "description": "Low-end fullness and resonance. Low = hollow and thin, high = full and solid.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Body",
+          "type": "number"
+        },
+        "brightness": {
+          "default": 0.5,
+          "description": "Spectral brightness. Low = dark and muffled, high = present and cutting.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "motion": {
+          "default": 0.4,
+          "description": "Amount of movement over time: LFO rate and depth, plus filter-envelope travel.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Motion",
+          "type": "number"
+        },
+        "grit": {
+          "default": 0.2,
+          "description": "Saturation and harmonic distortion.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Grit",
+          "type": "number"
+        },
+        "space": {
+          "default": 0.4,
+          "description": "Reverb, delay and chorus depth.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Space",
+          "type": "number"
+        },
+        "size": {
+          "default": 0.5,
+          "description": "Stereo width and unison detune. High = wide and thick, low = mono and focused.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Size",
+          "type": "number"
+        }
+      },
+      "title": "Macros",
+      "type": "object"
+    },
+    "MidiNote": {
+      "properties": {
+        "pitch": {
+          "maximum": 127,
+          "minimum": 0,
+          "title": "Pitch",
+          "type": "integer"
+        },
+        "start": {
+          "description": "Beats from the start of the part.",
+          "minimum": 0.0,
+          "title": "Start",
+          "type": "number"
+        },
+        "duration": {
+          "minimum": 0.0,
+          "title": "Duration",
+          "type": "number"
+        },
+        "velocity": {
+          "default": 0.8,
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Velocity",
+          "type": "number"
+        }
+      },
+      "required": [
+        "pitch",
+        "start",
+        "duration"
+      ],
+      "title": "MidiNote",
+      "type": "object"
+    },
+    "MidiPart": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "track_id": {
+          "title": "Track Id",
+          "type": "string"
+        },
+        "notes": {
+          "items": {
+            "$ref": "#/$defs/MidiNote"
+          },
+          "title": "Notes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "track_id"
+      ],
+      "title": "MidiPart",
+      "type": "object"
+    },
+    "Partial": {
+      "properties": {
+        "n": {
+          "description": "Harmonic number. 1 is the fundamental.",
+          "maximum": 128,
+          "minimum": 1,
+          "title": "N",
+          "type": "integer"
+        },
+        "amp": {
+          "description": "Relative amplitude of this harmonic.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Amp",
+          "type": "number"
+        }
+      },
+      "required": [
+        "n",
+        "amp"
+      ],
+      "title": "Partial",
+      "type": "object"
+    },
+    "PatchSpec": {
+      "description": "A deployable instrument preset.\n\nThe whole point: this is a portable, editable, re-generatable\ndescription -- not a rendered blob. Ship the spec alongside the stems\nand the MIDI and the user can retune it anywhere.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        },
+        "macros": {
+          "$ref": "#/$defs/Macros"
+        },
+        "spectrum": {
+          "$ref": "#/$defs/SpectrumSpec"
+        },
+        "shape": {
+          "$ref": "#/$defs/ShapeSpec"
+        },
+        "lfo": {
+          "$ref": "#/$defs/LfoSpec"
+        },
+        "seed": {
+          "default": 0,
+          "description": "Pinned for reproducibility. Changing it yields a deliberate variation, never a silent one.",
+          "minimum": 0,
+          "title": "Seed",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "PatchSpec",
+      "type": "object"
+    },
+    "ShapeSpec": {
+      "description": "Envelope shape expressed as feel, not seconds.",
+      "properties": {
+        "attack": {
+          "default": 0.3,
+          "description": "0 = instant, 1 = very slow swell.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Attack",
+          "type": "number"
+        },
+        "decay": {
+          "default": 0.4,
+          "description": "0 = sharp drop, 1 = long decay.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Decay",
+          "type": "number"
+        },
+        "sustain": {
+          "default": 0.7,
+          "description": "0 = decaying to silence, 1 = fully held.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Sustain",
+          "type": "number"
+        },
+        "release": {
+          "default": 0.5,
+          "description": "0 = cut off, 1 = long tail.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Release",
+          "type": "number"
+        }
+      },
+      "title": "ShapeSpec",
+      "type": "object"
+    },
+    "SpectrumSpec": {
+      "description": "How the oscillator's wavetable is built.\n\nThe engine never sees a wave. It sees a description of the harmonic\ncontent and synthesizes the table. This is the domain the LLM is\ngenuinely good at.",
+      "properties": {
+        "brightness": {
+          "default": 0.5,
+          "description": "How many harmonics are present at all.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Brightness",
+          "type": "number"
+        },
+        "odd_emphasis": {
+          "default": 0.0,
+          "description": "Positive favors odd harmonics (hollow, clarinet-like). Negative favors even (hollow, nasal).",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Odd Emphasis",
+          "type": "number"
+        },
+        "even_emphasis": {
+          "default": 0.0,
+          "description": "Positive favors even harmonics.",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Even Emphasis",
+          "type": "number"
+        },
+        "tilt": {
+          "default": 0.0,
+          "description": "Spectral tilt. Negative = darker (fast rolloff), positive = brighter (slow rolloff).",
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Tilt",
+          "type": "number"
+        },
+        "formant": {
+          "default": 0.0,
+          "description": "Resonant formant emphasis somewhere in the harmonic series.",
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Formant",
+          "type": "number"
+        },
+        "partials": {
+          "description": "Optional explicit partials. When present they override the derived spectrum.",
+          "items": {
+            "$ref": "#/$defs/Partial"
+          },
+          "title": "Partials",
+          "type": "array"
+        }
+      },
+      "title": "SpectrumSpec",
+      "type": "object"
+    },
+    "TrackSpec": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "role": {
+          "default": "texture",
+          "enum": [
+            "drums",
+            "bass",
+            "chords",
+            "lead",
+            "texture",
+            "fx"
+          ],
+          "title": "Role",
+          "type": "string"
+        },
+        "kind": {
+          "default": "midi",
+          "enum": [
+            "midi",
+            "audio"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "patch_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Patch Id"
+        },
+        "gain_db": {
+          "default": 0.0,
+          "maximum": 12.0,
+          "minimum": -48.0,
+          "title": "Gain Db",
+          "type": "number"
+        },
+        "pan": {
+          "default": 0.0,
+          "maximum": 1.0,
+          "minimum": -1.0,
+          "title": "Pan",
+          "type": "number"
+        },
+        "muted": {
+          "default": false,
+          "title": "Muted",
+          "type": "boolean"
+        },
+        "parts": {
+          "items": {
+            "$ref": "#/$defs/MidiPart"
+          },
+          "title": "Parts",
+          "type": "array"
+        },
+        "audio": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Path to a rendered audio stem (generative or rendered).",
+          "title": "Audio"
+        },
+        "generator": {
+          "additionalProperties": true,
+          "description": "Generative-audio request: provider, prompt, isolation tags, seed.",
+          "title": "Generator",
+          "type": "object"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "TrackSpec",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "version": {
+      "default": "1.0",
+      "title": "Version",
+      "type": "string"
+    },
+    "title": {
+      "default": "Untitled",
+      "title": "Title",
+      "type": "string"
+    },
+    "bpm": {
+      "default": 120.0,
+      "maximum": 300.0,
+      "minimum": 20.0,
+      "title": "Bpm",
+      "type": "number"
+    },
+    "key": {
+      "default": "C minor",
+      "title": "Key",
+      "type": "string"
+    },
+    "mode": {
+      "default": "natural minor",
+      "title": "Mode",
+      "type": "string"
+    },
+    "bars": {
+      "default": 8,
+      "minimum": 1,
+      "title": "Bars",
+      "type": "integer"
+    },
+    "time_signature": {
+      "default": [
+        4,
+        4
+      ],
+      "maxItems": 2,
+      "minItems": 2,
+      "prefixItems": [
+        {
+          "type": "integer"
+        },
+        {
+          "type": "integer"
+        }
+      ],
+      "title": "Time Signature",
+      "type": "array"
+    },
+    "brief": {
+      "$ref": "#/$defs/Brief"
+    },
+    "sections": {
+      "items": {
+        "$ref": "#/$defs/ArrangementSection"
+      },
+      "title": "Sections",
+      "type": "array"
+    },
+    "tracks": {
+      "items": {
+        "$ref": "#/$defs/TrackSpec"
+      },
+      "title": "Tracks",
+      "type": "array"
+    },
+    "patches": {
+      "items": {
+        "$ref": "#/$defs/PatchSpec"
+      },
+      "title": "Patches",
+      "type": "array"
+    }
+  },
+  "title": "SessionSpec",
+  "type": "object"
+}

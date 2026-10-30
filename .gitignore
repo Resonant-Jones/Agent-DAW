@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Render output
+out/
+out_live/
+*.wav
+*.mid
+*.rpp
+
+# Secrets — never commit credentials
+.env
+.env.*
+*.key
+!*.pubkey

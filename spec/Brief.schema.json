@@ -1,0 +1,74 @@
+{
+  "description": "The success contract the Producer posts before any tool runs.\n\nForces alignment, and makes the Artist's corrections surgical: you\nedit the `locked` line and everything downstream stays put.",
+  "properties": {
+    "goal": {
+      "default": "",
+      "title": "Goal",
+      "type": "string"
+    },
+    "deliverable": {
+      "default": "",
+      "title": "Deliverable",
+      "type": "string"
+    },
+    "tempo": {
+      "default": "",
+      "title": "Tempo",
+      "type": "string"
+    },
+    "layers": {
+      "default": "",
+      "title": "Layers",
+      "type": "string"
+    },
+    "midi_audio": {
+      "default": "",
+      "title": "Midi Audio",
+      "type": "string"
+    },
+    "length": {
+      "default": "",
+      "title": "Length",
+      "type": "string"
+    },
+    "energy": {
+      "default": "",
+      "title": "Energy",
+      "type": "string"
+    },
+    "structure": {
+      "default": "",
+      "title": "Structure",
+      "type": "string"
+    },
+    "movement": {
+      "default": "",
+      "title": "Movement",
+      "type": "string"
+    },
+    "production": {
+      "default": "",
+      "title": "Production",
+      "type": "string"
+    },
+    "variations": {
+      "default": "",
+      "title": "Variations",
+      "type": "string"
+    },
+    "locked": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Locked",
+      "type": "array"
+    },
+    "source": {
+      "default": "",
+      "title": "Source",
+      "type": "string"
+    }
+  },
+  "title": "Brief",
+  "type": "object"
+}

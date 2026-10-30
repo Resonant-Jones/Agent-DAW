@@ -1,0 +1,55 @@
+{
+  "description": "Six semantic timbre axes. Pure function of these -> concrete params.",
+  "properties": {
+    "body": {
+      "default": 0.5,
+      "description": "Low-end fullness and resonance. Low = hollow and thin, high = full and solid.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Body",
+      "type": "number"
+    },
+    "brightness": {
+      "default": 0.5,
+      "description": "Spectral brightness. Low = dark and muffled, high = present and cutting.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Brightness",
+      "type": "number"
+    },
+    "motion": {
+      "default": 0.4,
+      "description": "Amount of movement over time: LFO rate and depth, plus filter-envelope travel.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Motion",
+      "type": "number"
+    },
+    "grit": {
+      "default": 0.2,
+      "description": "Saturation and harmonic distortion.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Grit",
+      "type": "number"
+    },
+    "space": {
+      "default": 0.4,
+      "description": "Reverb, delay and chorus depth.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Space",
+      "type": "number"
+    },
+    "size": {
+      "default": 0.5,
+      "description": "Stereo width and unison detune. High = wide and thick, low = mono and focused.",
+      "maximum": 1.0,
+      "minimum": 0.0,
+      "title": "Size",
+      "type": "number"
+    }
+  },
+  "title": "Macros",
+  "type": "object"
+}

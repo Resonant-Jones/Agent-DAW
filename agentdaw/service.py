@@ -23,6 +23,7 @@ Nothing here is agent-specific. The Codexify router in
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import time
@@ -70,6 +71,23 @@ class Artifact(dict):
         return self["role"]
 
 
+def _content_hash(path: Path) -> str | None:
+    """sha256 of a produced file.
+
+    The host needs this to register the file in its own media registry,
+    and it is cheaper to compute it here, while the bytes are already
+    in hand, than to have the host read every stem back off disk.
+    """
+    try:
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+    except OSError:
+        return None
+
+
 def _artifact(
     path: Path | None,
     role: str,
@@ -79,6 +97,7 @@ def _artifact(
 ) -> dict[str, Any]:
     if path is None:
         return {}
+    exists = path.exists()
     return {
         "role": role,
         "path": str(path),
@@ -86,7 +105,8 @@ def _artifact(
         "mime_type": mime_type,
         "provenance": "generated",
         "track_id": track_id,
-        "bytes": Path(path).stat().st_size if Path(path).exists() else 0,
+        "bytes": path.stat().st_size if exists else 0,
+        "content_hash": _content_hash(path) if exists else None,
     }
 
 

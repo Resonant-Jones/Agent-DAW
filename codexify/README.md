@@ -11,7 +11,7 @@ imports anything here.
 | Path | What it is |
 |---|---|
 | `music-projects.patch` | A unified diff against four existing Codexify files |
-| `guardian/routes/music_projects.py` | New file: the Music Project state endpoints |
+| `guardian/routes/music_projects.py` | New file: the state endpoints and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New file: the Alembic migration |
 
 ## The diff touches four files
@@ -63,6 +63,9 @@ Then the skill, and then the router label.
   OpenAPI schema with no parameter demoted to a query string.
 - The profile YAML parses and `music_projects` is present in
   `route_posture.enabled`.
+- Every rendered artifact becomes a `MediaAsset` row that satisfies the
+  model's NOT NULL columns and CHECK constraints, with the identity
+  fields computed by Codexify's own `media_identity` service.
 
 **Not verified:**
 
@@ -77,6 +80,47 @@ Then the skill, and then the router label.
   `backend/requirements.txt`; only `httpx` is missing, and `httpx` is
   used solely by Agent-DAW's own LLM client. If Codexify supplies the
   inference, it is not needed at all.
+
+## Where the outputs go
+
+`MediaAsset` is already Codexify's canonical media registry, and it is
+the only one of the three registries with a `media_kind` that includes
+`audio` and a project-scoped foreign key
+(`guardian/db/models.py:3877`). So the mapping is one-to-one:
+
+| Agent-DAW artifact | `media_kind` | `mime_type` | `provenance` |
+|---|---|---|---|
+| stem WAV | `audio` | `audio/wav` | `generated` |
+| mix WAV | `audio` | `audio/wav` | `generated` |
+| MIDI | `other` | `audio/midi` | `generated` |
+| REAPER project | `other` | `text/plain` | `generated` |
+
+**The identity fields are computed by Codexify, not by the Producer.**
+`deterministic_id`, `normalized_slug`, `system_name` and
+`storage_prefix` are the host's rules, and `guardian/services/
+media_identity.py::compute_identity` already implements them.
+`register_artifacts()` in `guardian/routes/music_projects.py` calls that
+function rather than reimplementing it, so the rules cannot drift.
+Agent-DAW supplies only the facts it owns: the path, the media kind, the
+mime type, the byte count, and the content hash.
+
+The content hash is computed by the Producer while the bytes are already
+in hand, so the host does not read every stem back off disk just to
+hash it. It is the hash of the bytes *actually written to disk*, not of
+what was rendered in memory — otherwise the registry would index
+something the Artist never heard.
+
+Verified end to end against the real checkout: a render produces eight
+artifacts, each one becomes a `MediaAsset` row whose NOT NULL columns
+and CHECK constraints are satisfied, and audio lands under the `audio/`
+storage prefix:
+
+```
+deterministic_id : 20261030-7d126d8f
+normalized_slug  : pad
+system_name      : 20261030-7d126d8f--pad.wav
+storage_prefix   : audio/
+```
 
 ## The one design decision worth arguing about
 

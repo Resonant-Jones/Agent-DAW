@@ -1538,4 +1538,49 @@ def test_the_service_rejects_an_action_it_does_not_implement(tmp_path, monkeypat
     assert body["error"]["code"] == "unsupported_operation"
 
 
+def test_artifacts_carry_the_hash_of_the_file_on_disk(tmp_path, monkeypatch):
+    """A host registers files by content hash, so the Producer has to give it.
+
+    The hash has to be the hash of the bytes actually written, not of
+    what was rendered in memory -- otherwise the registry would index
+    something the Artist never heard.
+    """
+    import hashlib
+
+    from agentdaw import service as service_module
+
+    monkeypatch.setattr(
+        service_module, "_producer", lambda model=None: (StubProducer(), False)
+    )
+
+    result = service_module.compose_session(
+        "a warm pad over a slow bass groove", out_dir=tmp_path
+    )
+
+    artifacts = [a for a in result["artifacts"] if a]
+    assert artifacts
+
+    for artifact in artifacts:
+        path = Path(artifact["path"])
+        assert path.exists(), artifact
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        assert artifact["content_hash"] == digest, artifact["path"]
+        assert artifact["bytes"] == path.stat().st_size
+        assert artifact["provenance"] == "generated"
+        assert artifact["media_kind"] in {"audio", "other"}
+
+
+def test_a_missing_file_is_reported_honestly(tmp_path, monkeypatch):
+    """A missing file must not raise; it must report nothing, not a guess."""
+    from agentdaw.service import _artifact
+
+    described = _artifact(
+        tmp_path / "gone.wav", "stem", "audio", "audio/wav"
+    )
+
+    assert described["bytes"] == 0
+    assert described["content_hash"] is None
+
+
+
 

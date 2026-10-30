@@ -50,12 +50,27 @@ cleaner: it leaves the generic `projects` table alone and keeps
 music-specific fields (default library, default tempo, handoff target)
 out of everyone's way.
 
+**The obvious column is not available.** `projects` already has
+`system_role`, but it cannot carry this. Its CHECK constraint allows
+only `'general'` and `'imports'` (`guardian/db/models.py:961`), it means
+"system-owned" rather than "has a domain", and it carries a partial
+unique index -- `uq_projects_user_id_system_role`, unique over
+`(user_id, system_role)` where `system_role IS NOT NULL` (`:993-1000`).
+That index means a user could have exactly **one** music project under
+`system_role`. It is a column for "the system made this", not for "this
+is a music project".
+
+There is precedent for the separate-table shape: `media_assets` is
+already a project-scoped side table (`project_id` FK, `thread_id`
+nullable) rather than a column on `projects`. A `music_projects` table
+with `project_id` as its PK mirrors that exactly.
+
 Everything else -- threads, messages, artifacts, retrieval, the command
 bus -- is reused as-is.
 
 ---
 
-## 2. Three ways in, ranked
+## 2. Four ways in, ranked
 
 ### A. Route-mounted tools -- recommended
 
@@ -87,8 +102,9 @@ own routers (`_include_router`, `:252`):
 ```python
 _include_router(
     label="music_projects",
-    router=music_projects.router,
-    default_enabled=True,
+    flag_name="CODEXIFY_ENABLE_MUSIC_ROUTES",
+    include_fn=lambda: app.include_router(music_projects.router),
+    core_surface=True,
 )
 ```
 
@@ -98,7 +114,8 @@ whose label is not listed in the active supported profile
 `config/supported_profiles/*.yaml` under `route_posture`). A label that
 is missing from that YAML gets mounted but never advertised, and the
 routes silently never appear in the tool manifest. Add `music_projects`
-to the profile YAML in the same PR.
+to the profile YAML in the same PR. The default profile is
+`v1-local-core-web-mcp` (`guardian/core/supported_profile.py:15`).
 
 Also note: routes marked `internal_only` are deliberately popped out of
 `app.openapi()` by `_custom_openapi`, and therefore **never reach the
@@ -121,7 +138,58 @@ The request bodies are named for the Artist's vocabulary on purpose.
 *is* the model's only documentation, so the field names have to read as
 English to the Artist and the model at the same time.
 
-### B. A skill -- the behavioural half
+### B. A service plugin -- the isolated alternative, now implemented
+
+Codexify has a second, older extension seam: **service plugins**, which
+are separate HTTP services Codexify calls. The TTS plugin
+(`plugins/chatterbox/manifest.json`, `backend/tts_service/`) is the
+working example.
+
+The contract is the canonical service-plugin protocol v1.0:
+
+- **Discovery**: `plugins/<id>/manifest.json`, validated by
+  `guardian/plugins/plugin_manifest.py` (`PluginManifest`, `extra="forbid"`).
+  It carries `schema_version: "1.0"`, `id`, `name`, `version`,
+  `base_url` (http/https, host, no path/query/fragment), and
+  `capabilities: [{id, actions: [...]}]`.
+- **Invocation**: `POST {base_url}/invoke` with the envelope
+  `{protocol_version, plugin_id, capability, action, input, context}`
+  where `context` is `{request_id, thread_id, user_id}`.
+  `guardian/core/plugins.py::invoke_plugin` posts it; the response must
+  be `{"ok": bool, "output": {...} | null, "error": {...} | null}`.
+  `_normalize_response` raises on anything else, so `ok` being a
+  boolean is not negotiable.
+- **Health**: `GET {base_url}/health`, 2-second timeout
+  (`HEALTH_TIMEOUT_SECONDS`).
+- **Awareness**: `guardian/graph/capability_index.py` merges the
+  manifest's capabilities into the prompt layer, so the model is *told*
+  the plugin exists and what it can do.
+
+Agent-DAW implements this seam:
+
+```
+agentdaw/serve.py                              -> /health and /invoke
+agentdaw/codexify/plugins/agentdaw/manifest.json
+```
+
+The manifest has been validated against Codexify's own `PluginManifest`
+model (not against my reading of it), and a test asserts that the
+manifest's action list and the service's `ACTIONS` cannot drift apart --
+otherwise Codexify advertises a capability the service then refuses.
+
+The `context.thread_id` is load-bearing: the service namespaces artifacts
+under it, so the host can attribute files to the thread that made them.
+
+**The hard constraint: Codexify's plugin facade has a 10-second invoke
+timeout** (`INVOKE_TIMEOUT_SECONDS = 10`). A live compose takes about
+**107 seconds**, because the Producer's LLM call is the long pole -- the
+render itself is only ~2 seconds. A synchronous `compose` would be killed
+mid-flight. So the service implements an async job path: `input.mode =
+"async"` returns a job handle immediately and the host polls
+`GET /jobs/{job_id}`. `render`, `preview`, `measure` and `anchor` are all
+fast enough to stay synchronous.
+
+### C. A skill -- the behavioural half
 
 Codexify discovers skills on disk: project `.agents/skills` (first),
 `.claude/skills`, `.cursor/skills`, `.codex/skills`, `.gemini/skills`;
@@ -148,11 +216,13 @@ DSP units, retrieve before inventing, report measurements rather than
 adjectives, audition before committing, revise by delta, and keep the
 Artist's stated tempo/key/length locked.
 
-**A and B are complements, not alternatives.** The route is the
+**A and C are complements, not alternatives.** The route is the
 capability; the skill is the conduct. Without the skill the model has
 tools but no reason to prefer a library anchor over a fresh invention.
+The same is true of B: the plugin manifest is the capability, the skill
+is still the conduct.
 
-### C. An agent extension -- only if it should be proposable
+### D. An agent extension -- only if it should be proposable
 
 Codexify has a first-class extension lifecycle: proposal -> install gate
 -> registry -> binding -> activation -> dispatch (`guardian/extensions/`).
@@ -257,7 +327,7 @@ model sees the music-producer skill + the /api/music/* tools
         |
         v
 model calls POST /api/music/compose {"brief": "..."}
-        |
+        |  (~107s: the LLM call is the long pole -- see section 6)
         v
 Agent-DAW renders, measures, writes artifacts
         |
@@ -267,6 +337,28 @@ model calls POST /api/music/approve -> anchors enter project:{id}
         v
 stems/MIDI/project registered as MediaAsset against the project
 ```
+
+**A note on that diagram.** It draws compose as one blocking call, which
+is the simple case and the one worth getting working first. But compose
+takes ~107 seconds (section 6), and a chat turn that blocks that long
+is a turn the Artist watches hang. The shape that survives contact with a
+real chat is:
+
+```
+model calls compose -> returns a job handle          (fast)
+        |
+        v
+the job runs; the thread reports back when it lands   (slow, out of band)
+        |
+        v
+model calls preview / approve / render on the result  (fast)
+```
+
+Both integration paths need this. Path A needs the route to return a
+handle; path B needs it because the plugin facade's ceiling is 10
+seconds. The service layer already separates the operations that are
+fast from the one that is not, so this is a matter of how the host
+schedules the slow one.
 
 The Producer does not need its own agent runtime inside Codexify. It is
 a *tool* the model's thread can call, and the result is ordinary chat
@@ -280,8 +372,44 @@ the delegation drafts at `/api/delegations`
 
 ---
 
-## 6. The Producer's rules, and where they are enforced
+## 6. What the timings actually are
 
+Measured on this machine against the live MiniMax gateway, not estimated:
+
+| Operation | Time | What dominates |
+|---|---|---|
+| Compose (stub Producer, no LLM) | 3.8s end to end | 2.0s of DSP render; the rest is interpreter startup |
+| Compose (live LLM) + render | **~107s** | the LLM call. The render is still only ~2s |
+| Preview (one patch) | well under 1s | DSP only, no LLM |
+
+The thinking budget was the obvious suspect, so it was profiled rather
+than assumed. It is not the cause:
+
+| Thinking budget | Compose latency |
+|---|---|
+| 4000 (default) | ~107s |
+| 1024 | 137s |
+| 256 | 159s |
+
+No correlation -- if anything, lower budgets were slower. The latency
+is inherent to the model on this gateway, and **cannot be tuned away**.
+
+That number decides the integration, because Codexify's plugin facade
+allows **10 seconds** per invoke. So:
+
+- The **service-plugin path (B) must be asynchronous** for compose. The
+  job API in `agentdaw/serve.py` exists for exactly this.
+- The **route path (A) has no such ceiling**, but a chat turn that
+  blocks for ~107 seconds on one tool call is a turn the Artist watches
+  hang. The honest shape is the same as (B): start the job, return a
+  handle, let the thread report back when it lands.
+
+Either way, the fast operations are the ones that should be synchronous.
+`preview`, `render`, `measure` and `anchor` are all sub-second to
+two-second operations, and they are the ones an audition loop actually
+uses.
+
+## 7. The Producer's rules, and where they are enforced
 These are not prompt conventions. Each is enforced in code, because a
 model that can be talked into writing `cutoff: 2400` has broken the
 system.
@@ -297,31 +425,63 @@ system.
 
 ---
 
-## 7. Wiring checklist
+## 8. Wiring checklist
 
 **In Agent-DAW (this repository, done):**
 
 - [x] `agentdaw/service.py` -- the operations, JSON in and out
-- [x] `agentdaw/codexify/router.py` -- the FastAPI adapter
+- [x] `agentdaw/codexify/router.py` -- the FastAPI adapter (path A)
+- [x] `agentdaw/serve.py` -- the service-plugin adapter (path B)
+- [x] `agentdaw/codexify/plugins/agentdaw/manifest.json` -- validated
+      against Codexify's `PluginManifest`
 - [x] `agentdaw/codexify/skills/music-producer/SKILL.md` -- the behaviour
 - [x] `agentdaw/library.py` -- retrieval anchors and delta revisions
 - [x] `--render-dir` and `--measurements` on `demo` / `compose`
 
-**In Codexify (a PR against Codexify's own review process):**
+**In Codexify, for path A (route-mounted):**
 
 - [ ] `guardian/routes/music_projects.py` -- thin wrapper over `build_router`
 - [ ] `_include_router(label="music_projects", ...)` in `guardian/guardian_api.py`
 - [ ] Add `music_projects` to `config/supported_profiles/*.yaml` -- **or it is quarantined**
 - [ ] Install the skill: `cp -R agentdaw/codexify/skills/music-producer ~/.agents/skills/`
-- [ ] Add `agentdaw` to the backend's requirements
-- [ ] Alembic migration for the music-project discriminator
+- [ ] Get `agentdaw` importable in the backend image (see section 9)
+- [ ] Alembic migration for the `music_projects` table
 - [ ] Register artifacts as `MediaAsset` after each render
 - [ ] Mirror approved anchors into `VectorStore` under `project:{id}`
 
+**In Codexify, for path B (service plugin):**
+
+- [ ] `plugins/agentdaw/manifest.json` -- copy from this repo
+- [ ] A compose service for the image, plus a docker-compose service
+      named `agentdaw` so `base_url` resolves
+- [ ] Install the skill: `cp -R agentdaw/codexify/skills/music-producer ~/.agents/skills/`
+- [ ] The same Alembic migration, `MediaAsset` registration and anchor
+      mirroring as above -- a plugin does not change where state lives
+
 ---
 
-## 8. Things to know before you start
+## 9. Things to know before you start
 
+- **Five of Agent-DAW's six dependencies are already in Codexify's
+  locked backend requirements**: `numpy==2.2.6`, `scipy==1.16.2`,
+  `pydantic==2.12.3`, `pyyaml==6.0.3`, `jsonschema==4.25.1`
+  (`backend/requirements.txt`). Only `httpx` is missing -- and `httpx`
+  is used solely by Agent-DAW's own LLM client. If Codexify supplies the
+  inference (section 2's recommendation), `httpx` is not needed at all.
+- **The backend image has no `git`.** `backend/Dockerfile` installs from
+  a pre-compiled `backend/requirements.txt` and copies site-packages out
+  of a builder stage; `git` is never installed. A git dependency
+  therefore needs a Dockerfile change as well as network access at build
+  time. Vendoring the package avoids both.
+- **`from __future__ import annotations` breaks FastAPI request models
+  defined inside a function.** The annotation becomes a string at
+  runtime, and FastAPI resolves those strings against the defining
+  module's globals -- so a model defined in a local scope cannot be
+  resolved, and FastAPI silently demotes the argument to a *query
+  parameter*. Every request then 422s, while the route still appears in
+  the OpenAPI schema looking plausible. Agent-DAW's request models live
+  at module scope for this reason, and a test asserts on the generated
+  schema.
 - **`main` is PR-first.** Changes to `main` in Codexify go through a
   pull request. A task authorisation is not authorisation to bypass the
   review policy.

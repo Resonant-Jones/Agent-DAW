@@ -15,7 +15,8 @@
         "render",
         "measure",
         "anchor",
-        "approve"
+        "approve",
+        "job_status"
       ]
     }
   ],

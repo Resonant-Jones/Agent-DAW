@@ -6,28 +6,37 @@ it can be reviewed before it touches Codexify's repository.
 It is **not** part of the `agentdaw` package. Nothing in `agentdaw/`
 imports anything here.
 
+## The shape
+
+**The engine runs in its own service; the route does not.**
+
+Codexify derives its model-callable tools from the app's OpenAPI schema
+(`guardian/command_bus/manifest.py` -> `guardian/tools/derive.py`), so a
+route has to exist in the Codexify process for the model to be able to
+call it. But nothing says the code that renders audio has to live there.
+
+So `/api/music/*` forwards over the canonical service-plugin protocol to
+an Agent-DAW container, and Codexify never imports `agentdaw`. This is
+the shape Codexify's own TTS plugin already uses: a service for the
+engine, in-process code to reach it.
+
+A compose takes about **107 seconds** -- the Producer's model call is the
+long pole, and the render itself is about two seconds -- so `compose`
+returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
+
 ## What is here
 
 | Path | What it is |
 |---|---|
 | `music-projects.patch` | A unified diff against four existing Codexify files |
-| `guardian/routes/music_projects.py` | New file: the state endpoints and the artifact registration |
-| `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New file: the Alembic migration |
+| `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
+| `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
+| `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
+| `plugins/agentdaw/manifest.json` | New: what Codexify advertises the service as |
+| `guardian/skills/music-producer/SKILL.md` | New: the conduct |
+| `tests/routes/test_music_projects.py` | New: the tests |
 
-## The diff touches four files
-
-| File | Change |
-|---|---|
-| `guardian/db/models.py` | Adds the `MusicProject` model |
-| `guardian/core/pgdb.py` | Adds `get/upsert/delete/list_music_project` to `PgDB` |
-| `guardian/guardian_api.py` | Mounts the router under the `music_projects` label |
-| `config/supported_profiles/v1-local-core-web-mcp.yaml` | Adds `music_projects` to `route_posture.enabled` |
-
-That last one is not optional. Codexify **quarantines** any router whose
-label is not listed in the active supported profile
-(`guardian/core/supported_profile.py:38-46`). A missing label means the
-routes mount but never reach the tool manifest, and the Producer is
-silently uncallable.
+The compose service and the `guardian_api.py` mount are in the patch.
 
 ## How to apply it
 
@@ -39,47 +48,49 @@ git apply codexify/music-projects.patch
 cp codexify/guardian/routes/music_projects.py guardian/routes/
 cp codexify/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py \
    guardian/db/migrations/versions/
+cp codexify/config/supported_profiles/v1-music-producer.yaml config/supported_profiles/
+mkdir -p plugins/agentdaw
+cp codexify/plugins/agentdaw/manifest.json plugins/agentdaw/
+mkdir -p guardian/skills/music-producer
+cp codexify/guardian/skills/music-producer/SKILL.md guardian/skills/music-producer/
+cp codexify/tests/routes/test_music_projects.py tests/routes/
 ```
 
-Then the skill, and then the router label.
+Then start the engine:
 
-## What has been verified, and what has not
+```bash
+docker compose --profile music up -d agentdaw
+```
 
-**Verified, against the real Codexify checkout:**
+and select the profile so the routes are not quarantined:
 
-- The migration loads in Alembic and leaves **exactly one head**, with
-  `a7d4c9e2f1b3` directly descending from the merge head `3a91d7c4e8b2`.
-  (`alembic heads` reported 31 candidate heads when the revision graph
-  was parsed by regex; Alembic itself reports one. The regex was wrong,
-  not the chain.)
-- The migration renders to valid Postgres DDL in Alembic's offline mode,
-  including `PRIMARY KEY (project_id)` and
-  `FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE`.
-- The `MusicProject` model and the migration **describe the same table**.
-  The model's DDL was rendered and diffed against the migration's DDL,
-  column by column, and they match.
-- `guardian/routes/music_projects.py` imports cleanly against the real
-  `guardian` package, mounts the four expected paths, and produces an
-  OpenAPI schema with no parameter demoted to a query string.
-- The profile YAML parses and `music_projects` is present in
-  `route_posture.enabled`.
-- Every rendered artifact becomes a `MediaAsset` row that satisfies the
-  model's NOT NULL columns and CHECK constraints, with the identity
-  fields computed by Codexify's own `media_identity` service.
+```bash
+CODEXIFY_SUPPORTED_PROFILE=v1-music-producer docker compose up -d
+```
 
-**Not verified:**
+## The supported profile is a separate file on purpose
 
-- The patch has not been applied to a Codexify checkout, so it has not
-  been run against Codexify's own test suite. Its own CI is the real
-  gate.
-- The `PgDB` methods have not been executed against a live Postgres. The
-  SQL follows the surrounding methods' idiom, but "follows the idiom" is
-  not "runs".
-- `agentdaw` is not yet importable inside the Codexify backend image.
-  Five of its six dependencies are already in Codexify's locked
-  `backend/requirements.txt`; only `httpx` is missing, and `httpx` is
-  used solely by Agent-DAW's own LLM client. If Codexify supplies the
-  inference, it is not needed at all.
+`config/supported_profiles/v1-local-core-web-mcp.yaml` -- the default
+profile -- is **byte-frozen**. There is a test that asserts it is
+identical to HEAD:
+
+```python
+def test_default_profile_file_is_unchanged_from_head() -> None:
+    expected = subprocess.check_output(
+        ["git", "show", f"HEAD:config/supported_profiles/{DEFAULT_PROFILE_NAME}.yaml"],
+        cwd=REPO_ROOT,
+    )
+    assert DEFAULT_PROFILE_PATH.read_bytes() == expected
+```
+
+So a new capability gets its own profile rather than a change to the
+default one. `v1-music-producer.yaml` is a copy of the default with
+`music_projects` enabled.
+
+Every *other* profile leaves `music_projects` quarantined -- the same
+invariant the Hosted Room route families hold -- so the Producer is
+absent rather than broken wherever it was not asked for. There is a test
+for that too.
 
 ## Where the outputs go
 
@@ -99,15 +110,15 @@ the only one of the three registries with a `media_kind` that includes
 `deterministic_id`, `normalized_slug`, `system_name` and
 `storage_prefix` are the host's rules, and `guardian/services/
 media_identity.py::compute_identity` already implements them.
-`register_artifacts()` in `guardian/routes/music_projects.py` calls that
-function rather than reimplementing it, so the rules cannot drift.
-Agent-DAW supplies only the facts it owns: the path, the media kind, the
-mime type, the byte count, and the content hash.
+`register_artifacts()` calls that function rather than reimplementing
+it, so the rules cannot drift. Agent-DAW supplies only the facts it
+owns: the path, the media kind, the mime type, the byte count, and the
+content hash.
 
 The content hash is computed by the Producer while the bytes are already
 in hand, so the host does not read every stem back off disk just to
 hash it. It is the hash of the bytes *actually written to disk*, not of
-what was rendered in memory — otherwise the registry would index
+what was rendered in memory -- otherwise the registry would index
 something the Artist never heard.
 
 Verified end to end against the real checkout: a render produces eight
@@ -143,6 +154,32 @@ truth. The scalar columns beside it (`bpm`, `musical_key`, `bars`, ...)
 are a queryable projection of the same values -- "every project at 120
 BPM" should not mean parsing JSON. They are deliberately not indexed:
 the table is small and is almost always reached by `project_id`.
+
+## What has been verified, and what has not
+
+**Verified, against the real Codexify checkout:**
+
+- The migration leaves **exactly one** Alembic head, and renders valid
+  Postgres DDL in Alembic's offline mode, including
+  `PRIMARY KEY (project_id)` and
+  `FOREIGN KEY(project_id) REFERENCES projects (id) ON DELETE CASCADE`.
+- The `MusicProject` model and the migration **describe the same table**.
+  The model's DDL was rendered and diffed against the migration's DDL,
+  column by column, and they match.
+- `guardian/routes/music_projects.py` imports cleanly against the real
+  `guardian` package and produces an OpenAPI schema with no parameter
+  demoted to a query string.
+- 14 new tests pass, and the supported-profile, command-bus, config and
+  architecture suites still pass.
+
+**Not verified:**
+
+- The `PgDB` methods have not been executed against a live Postgres. The
+  SQL follows the surrounding methods' idiom, but "follows the idiom" is
+  not "runs".
+- The route has never been exercised against a live Agent-DAW service.
+  The forwarding is tested against a stubbed transport; the two halves
+  have not been run together.
 
 ## The latency constraint that shapes the host integration
 

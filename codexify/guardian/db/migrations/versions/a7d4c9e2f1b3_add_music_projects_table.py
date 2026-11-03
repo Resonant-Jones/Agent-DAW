@@ -1,7 +1,7 @@
 """add music_projects table
 
 Revision ID: a7d4c9e2f1b3
-Revises: 3a91d7c4e8b2
+Revises: d91e4fa6702b
 Create Date: 2026-10-30 16:10:00.000000
 
 A Music Project is an ordinary Codexify ``Project`` whose musical state
@@ -37,7 +37,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision: str = "a7d4c9e2f1b3"
-down_revision: str | Sequence[str] | None = "3a91d7c4e8b2"
+down_revision: str | Sequence[str] | None = "d91e4fa6702b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

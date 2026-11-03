@@ -44,6 +44,7 @@ it, so the import happens inside :func:`build_app`.
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 import traceback
@@ -75,13 +76,24 @@ ACTIONS = (
     "measure",
     "anchor",
     "approve",
+    "job_status",
 )
 
 PROTOCOL_VERSION = "1.0"
 SERVICE_NAME = "Agent-DAW"
 SERVICE_VERSION = "0.1.0"
 
-DEFAULT_OUT_ROOT = Path("out")
+#: Where rendered artifacts go.
+#:
+#: This matters more than it looks. When the service runs in a container
+#: and the DAW runs on the host, the files have to be written into a
+#: directory that is a bind-mount, or the host cannot open them. The
+#: environment variable is how the operator points the service at that
+#: mount without rebuilding the image; the image sets it to the mount
+#: path, and a local run falls back to a relative directory.
+ENV_OUT_ROOT = "AGENTDAW_OUT_ROOT"
+
+DEFAULT_OUT_ROOT = Path(os.environ.get(ENV_OUT_ROOT) or "out")
 
 
 # --------------------------------------------------------------------------
@@ -182,6 +194,12 @@ class _JobStore:
         job.finished_at = time.time()
 
 
+#: The job registry is a module-level singleton so that the ``job_status``
+#: action can reach it from the dispatcher, which has no access to the
+#: closure the app is built in.
+_JOBS = _JobStore()
+
+
 # --------------------------------------------------------------------------
 # action dispatch
 # --------------------------------------------------------------------------
@@ -267,6 +285,12 @@ def _dispatch(action: str, payload: dict[str, Any], context: dict[str, Any]) -> 
             library_path=payload.get("library_path") or payload.get("library"),
         )
 
+    if action == "job_status":
+        job = _JOBS.get(str(payload.get("job_id") or ""))
+        if job is None:
+            raise KeyError(f"no such job: {payload.get('job_id')}")
+        return job.snapshot()
+
     raise _UnsupportedAction(action)
 
 
@@ -305,7 +329,7 @@ def build_app(out_root: str | Path | None = None):
         ),
     )
 
-    jobs = _JobStore()
+    jobs = _JOBS
     pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="agentdaw")
 
     def _run_job(job: _Job, payload: dict[str, Any], context: dict[str, Any]) -> None:

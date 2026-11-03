@@ -5,11 +5,33 @@ Music Project Routes
 A Music Project is an ordinary Codexify ``Project`` with musical state
 attached to it. There is no parallel chat concept: threads and chats are
 the existing ``ChatThread`` / ``ChatMessage`` rows, which already carry
-a ``project_id`` foreign key. What this module adds is the ability to
-read and write the musical state, and to mount the Producer's own routes
-so a thread can call them.
+a ``project_id`` foreign key.
 
-The state endpoints here are deliberately thin. The Producer owns the
+This module is deliberately **thin**. It does two things:
+
+1. Reads and writes the musical state of a Music Project.
+2. Forwards the Producer's operations to the Agent-DAW service, which
+   runs as its own container.
+
+The split is not decorative. Codexify derives its model-callable tools
+from the app's OpenAPI schema (``guardian/command_bus/manifest.py`` ->
+``guardian/tools/derive.py``), so the model can only call a route that
+exists *here*. That route has to exist in this process for the tool to
+exist at all -- but the code that renders audio does not have to.
+
+So this module owns the contract and the forwarding, and the service
+owns the music. Codexify never imports ``agentdaw``: the dependency runs
+in the other direction, over HTTP, on the canonical service-plugin
+protocol (``POST {base_url}/invoke`` with the versioned envelope).
+
+**Why the forwarding is asynchronous by default.** A live compose takes
+around 107 seconds -- the Producer's LLM call is the long pole, and the
+render itself is only about two seconds. Blocking a chat turn for that
+long is a turn the Artist watches hang, so ``compose`` returns a job
+handle and the caller polls ``GET /api/music/jobs/{job_id}``. The quick
+operations -- preview, render, measure, anchor -- are synchronous.
+
+The state endpoints here are thin on purpose too. The Producer owns the
 music; this side owns the record of it. Everything that decides *what*
 the music should be -- tempo, key, bars, the spec itself -- is derived
 by the Producer and written back complete, never patched field by field,
@@ -22,8 +44,9 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, Depends, HTTPException
-from pydantic import BaseModel, ConfigDict
+import requests
+from fastapi import APIRouter, Body, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
 
 from guardian.config.db_defaults import DEFAULT_PG_DSN
 
@@ -48,6 +71,172 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/music", tags=["music"])
 
+#: Where the Agent-DAW service lives. Matches the ``base_url`` in
+#: ``plugins/agentdaw/manifest.json``; both point at the compose service
+#: name, so the two cannot drift apart without the manifest changing too.
+ENV_AGENTDAW_URL = "AGENTDAW_SERVICE_URL"
+DEFAULT_AGENTDAW_URL = "http://agentdaw:8000"
+
+#: The canonical service-plugin protocol version. It is checked, not
+#: assumed: the service refuses an envelope it does not understand, and
+#: this side refuses a response that does not carry ``ok``.
+PROTOCOL_VERSION = "1.0"
+PLUGIN_ID = "agentdaw"
+CAPABILITY = "music"
+
+#: The facade uses 10 seconds for a plugin invoke
+#: (``INVOKE_TIMEOUT_SECONDS`` in ``guardian/core/plugins.py``). A compose
+#: takes about 107, so the request that starts one returns immediately
+#: with a job handle and the work continues on the service.
+JOB_ACTIONS = {"compose"}
+
+
+def _service_url() -> str:
+    return (os.getenv(ENV_AGENTDAW_URL) or DEFAULT_AGENTDAW_URL).rstrip("/")
+
+
+def _invoke(
+    action: str,
+    payload: Dict[str, Any],
+    *,
+    context: Optional[Dict[str, Any]] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    """Call one Agent-DAW operation through the canonical envelope.
+
+    The response is the canonical one: ``ok`` plus either ``output`` or
+    ``error``. A response that does not carry a boolean ``ok`` is a
+    broken service, not a bad request, and it is reported as such.
+    """
+    envelope = {
+        "protocol_version": PROTOCOL_VERSION,
+        "plugin_id": PLUGIN_ID,
+        "capability": CAPABILITY,
+        "action": action,
+        "input": payload,
+        "context": context or {},
+    }
+    url = f"{_service_url()}/invoke"
+
+    try:
+        response = requests.post(url, json=envelope, timeout=timeout)
+    except requests.RequestException as exc:
+        logger.warning("[music_projects] agentdaw service unreachable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail=f"the music service is unreachable: {exc}",
+        )
+
+    if response.status_code >= 400:
+        logger.warning(
+            "[music_projects] agentdaw service returned %s: %s",
+            response.status_code,
+            response.text[:300],
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"the music service returned {response.status_code}",
+        )
+
+    try:
+        body = response.json()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"the music service returned malformed JSON: {exc}",
+        )
+
+    if not isinstance(body, dict) or not isinstance(body.get("ok"), bool):
+        raise HTTPException(
+            status_code=502,
+            detail="the music service returned a malformed response",
+        )
+
+    if body["ok"] is False:
+        error = body.get("error") or {}
+        raise HTTPException(
+            status_code=502,
+            detail=error.get("message") or "the music service reported an error",
+        )
+
+    return body.get("output") or {}
+
+
+# --------------------------------------------------------------------------
+# Request models
+#
+# Module scope on purpose: this module uses postponed annotation
+# evaluation, so FastAPI resolves the annotation strings against these
+# module globals. A model defined inside a function cannot be resolved
+# there, and FastAPI silently demotes the argument to a query parameter.
+# The schema is the model's only documentation, so the field names are
+# the Artist's vocabulary -- brief, feedback, query -- not params.
+# --------------------------------------------------------------------------
+
+
+class ComposeRequest(BaseModel):
+    """The Artist's brief, in the Artist's words.
+
+    Describe the music: mood, tempo, instrumentation, how it should move,
+    how long it should be. Tempo, key, bar count and length stated here
+    are treated as locked and will not be reinterpreted. Do not pass DSP
+    values -- the engine owns those.
+    """
+
+    brief: str = Field(
+        ...,
+        description="The artist's description, in plain words. Not DSP parameters.",
+    )
+    library: str | None = Field(
+        default=None, description="Path to the approved patch library JSON."
+    )
+    render: bool = Field(
+        default=True, description="Also render stems, MIDI and the project."
+    )
+    sync: bool = Field(
+        default=False,
+        description=(
+            "Wait for the result instead of returning a job handle. A compose "
+            "takes about 107 seconds because the model's own call is the long "
+            "pole, so the default is to return a job id and poll it."
+        ),
+    )
+
+
+class ReviseRequest(BaseModel):
+    """A correction to an existing session."""
+
+    spec: Dict[str, Any] = Field(..., description="The existing session spec.")
+    feedback: str = Field(
+        ..., description="What the artist wants changed, in plain words."
+    )
+    library: str | None = None
+
+
+class PreviewRequest(BaseModel):
+    """A fast audition of one patch."""
+
+    spec: Dict[str, Any] = Field(..., description="The session spec.")
+    patch_id: str = Field(..., description="Which patch to audition.")
+
+
+class RenderRequest(BaseModel):
+    """A full render of a spec."""
+
+    spec: Dict[str, Any] = Field(..., description="The session spec.")
+    out_dir: str | None = None
+
+
+class ApproveRequest(BaseModel):
+    """Promote a session's patches into the approved library."""
+
+    spec: Dict[str, Any] = Field(..., description="The session spec.")
+    measurements: Dict[str, Dict[str, float]] | None = Field(
+        default=None,
+        description="Per-track measurements, keyed by track id.",
+    )
+    library: str | None = None
+
 
 class MusicProjectState(BaseModel):
     """The musical state of a Music Project.
@@ -70,28 +259,130 @@ class MusicProjectState(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
-class MusicProjectView(BaseModel):
-    """A Music Project as the host sees it."""
+# --------------------------------------------------------------------------
+# Producer operations -- forwarded to the Agent-DAW service
+# --------------------------------------------------------------------------
 
-    project_id: int
-    bpm: Optional[float] = None
-    musical_key: Optional[str] = None
-    musical_mode: Optional[str] = None
-    bars: Optional[int] = None
-    time_signature: Optional[str] = None
-    length_seconds: Optional[float] = None
-    library_path: Optional[str] = None
-    current_spec: Optional[Dict[str, Any]] = None
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+
+@router.post(
+    "/compose",
+    summary="Produce a music session from an artist's description",
+    description=(
+        "Turn a description into a session: a spec, rendered stems, MIDI, a mix "
+        "and a REAPER project, plus the measurements that were taken of them. "
+        "Approved patches are retrieved from the library and revised rather "
+        "than reinvented when one matches. Returns a job id; poll "
+        "GET /api/music/jobs/{job_id} for the result."
+    ),
+)
+def compose(req: ComposeRequest) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {
+        "brief": req.brief,
+        "library": req.library,
+        "render": req.render,
+    }
+    if req.sync:
+        payload["mode"] = "sync"
+    else:
+        payload["mode"] = "async"
+
+    # A synchronous compose outlives the HTTP timeout below, so it gets
+    # its own, generous one.
+    timeout = 600 if req.sync else 30
+    return _invoke("compose", payload, timeout=timeout)
+
+
+@router.post(
+    "/revise",
+    summary="Revise a session from the artist's correction",
+    description=(
+        "Apply a correction in plain words. Everything the artist did not "
+        "mention stays as it was; the returned spec is a complete new state."
+    ),
+)
+def revise(req: ReviseRequest) -> Dict[str, Any]:
+    return _invoke(
+        "revise",
+        {"spec": req.spec, "feedback": req.feedback, "library": req.library},
+    )
+
+
+@router.post(
+    "/preview",
+    summary="Audition one patch quickly",
+    description=(
+        "Render one patch under the session's drum bed. Fast on purpose: this "
+        "is the loop the artist approves a sound in. Returns measurements, "
+        "not adjectives."
+    ),
+)
+def preview(req: PreviewRequest) -> Dict[str, Any]:
+    return _invoke("preview", {"spec": req.spec, "patch_id": req.patch_id})
+
+
+@router.post(
+    "/render",
+    summary="Render a spec to stems, MIDI, a mix and a project",
+)
+def render(req: RenderRequest) -> Dict[str, Any]:
+    return _invoke("render", {"spec": req.spec, "out_dir": req.out_dir})
+
+
+@router.get(
+    "/anchors",
+    summary="Find approved patches that match a request",
+    description=(
+        "Search the approved patch library. A miss is a legitimate answer and "
+        "is reported as one, so the artist can be told that nothing matches "
+        "instead of being handed a false recall."
+    ),
+)
+def anchors(
+    query: str = Query(..., description="What to look for, in plain words."),
+    library: str | None = Query(default=None),
+    limit: int = Query(default=5),
+) -> Dict[str, Any]:
+    return _invoke(
+        "anchor",
+        {"query": query, "library": library, "limit": limit},
+    )
+
+
+@router.post(
+    "/approve",
+    summary="Promote a session's patches into the approved library",
+)
+def approve(req: ApproveRequest) -> Dict[str, Any]:
+    return _invoke(
+        "approve",
+        {
+            "spec": req.spec,
+            "measurements": req.measurements,
+            "library": req.library,
+        },
+    )
+
+
+@router.get(
+    "/jobs/{job_id}",
+    summary="Poll an asynchronous music job",
+    description=(
+        "Compose takes about 107 seconds, so it runs as a job. Poll this for "
+        "the result. The status is one of running, succeeded or failed."
+    ),
+)
+def job_status(job_id: str) -> Dict[str, Any]:
+    return _invoke("job_status", {"job_id": job_id})
+
+
+# --------------------------------------------------------------------------
+# Music Project state -- Codexify's own rows
+# --------------------------------------------------------------------------
 
 
 def _require_db():
     if chatlog_db is None:
-        raise HTTPException(
-            status_code=503,
-            detail="database is not configured",
-        )
+        raise HTTPException(status_code=503, detail="database is not configured")
     return chatlog_db
 
 
@@ -206,19 +497,6 @@ def delete_music_project(
     return {"project_id": project_id, "deleted": True}
 
 
-def build_producer_router():
-    """Build Agent-DAW's producer routes.
-
-    Imported lazily so Agent-DAW stays an optional extra: a host that
-    has not installed it should still boot. The caller decides what to
-    do when this raises -- the routes will simply be absent from the
-    OpenAPI schema, and therefore from the model's tool list.
-    """
-    from agentdaw.codexify.router import build_router
-
-    return build_router(prefix="/api/music")
-
-
 def _media_db():
     """Return a database handle that can open a SQLAlchemy session.
 
@@ -249,7 +527,7 @@ def register_artifacts(
     ``system_name``, ``storage_prefix`` -- are computed by Codexify's own
     ``media_identity`` service, not by the Producer. Agent-DAW knows what
     a file *is*; the host owns the rules for naming and storing it, and
-    duplicating those rules in the Producer would let them drift.
+    duplicating those rules would let them drift.
 
     Returns one row per registered artifact, with the asset id.
     """
@@ -265,9 +543,7 @@ def register_artifacts(
     for artifact in artifacts:
         path = Path(str(artifact.get("path") or ""))
         if not path.exists():
-            logger.warning(
-                "[music_projects] artifact is missing on disk: %s", path
-            )
+            logger.warning("[music_projects] artifact is missing on disk: %s", path)
             continue
 
         media_kind = str(artifact.get("media_kind") or "other")
@@ -328,4 +604,3 @@ def register_artifacts(
         )
 
     return registered
-

@@ -26,9 +26,20 @@ exceptions, and those are stated by the Artist, not chosen by you.
    Artist's words first. If an approved patch matches, that patch is
    known to work. Revise it instead of starting over.
 
-2. **Compose.** Call `/api/music/compose` with the brief. You get back a
-   spec, rendered stems, MIDI, a mix and a REAPER project, along with the
-   measurements that were taken of all of it.
+2. **Compose.** Call `/api/music/compose` with the brief. It returns a
+   **job id**, not the music. A compose takes about 107 seconds -- the
+   model's own call to turn words into a spec is the long pole, and the
+   render itself is only about two -- so the call starts the work and
+   returns immediately.
+
+   Poll `/api/music/jobs/{job_id}` until the status is `succeeded` or
+   `failed`. While it is `running`, tell the Artist what you are doing
+   rather than going silent. When it lands you get a spec, rendered
+   stems, MIDI, a mix and a REAPER project, along with the measurements
+   that were taken of all of it.
+
+   Everything else is fast enough to answer directly. `preview`,
+   `render`, `measure` and `anchors` return their result in the call.
 
 3. **Report measurements, never adjectives.** "The pad's spectral
    centroid is 702 Hz -- very dark" is useful. "The pad sounds dark" is

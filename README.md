@@ -358,20 +358,52 @@ Project is a `Project` row; its threads and chats are the ordinary
 `ChatThread` / `ChatMessage` pairs (there is no separate chats table);
 the approved patches live in the vector store under a project-scoped
 namespace; the stems and MIDI register as `MediaAsset` rows. And because
-Codexify derives its agent-callable tools from the OpenAPI schema,
-mounting the routes is what makes the Producer callable by a model.
+Codexify derives its agent-callable tools from the OpenAPI schema, a
+route that exists in the Codexify app is what makes the Producer callable
+by a model.
 
-Three pieces ship here:
+**The engine runs in its own container; the route does not.** Codexify
+derives tools only from its own OpenAPI schema, so the route has to live
+in the Codexify process — but nothing says the code that renders audio
+has to. So Agent-DAW runs as a service and Codexify forwards to it:
+
+```
+Codexify thread ──▶ /api/music/compose  (a route, so it becomes a tool)
+                          │
+                          ▼  canonical service-plugin envelope
+                    Agent-DAW container ──▶ stems, MIDI, mix, .rpp
+```
+
+That is the same shape Codexify's own TTS plugin uses: a service for the
+engine, in-process code to reach it. It keeps a 107-second-capable DSP
+process out of the backend, and it gives Agent-DAW its own release cycle.
+
+Four pieces ship here:
 
 | Piece | Path | What it is |
 |---|---|---|
 | Service layer | `agentdaw/service.py` | the operations, plain data in and out, no web framework |
-| Router | `agentdaw/codexify/router.py` | a FastAPI adapter over the service layer |
+| Service | `agentdaw/serve.py` | the canonical service-plugin surface: `/health` and `/invoke` |
+| Plugin manifest | `agentdaw/codexify/plugins/agentdaw/manifest.json` | what Codexify advertises the service as |
 | Skill | `agentdaw/codexify/skills/music-producer/SKILL.md` | the conduct: retrieve before inventing, measure don't opine, revise by delta |
 
-The Codexify-side wiring is a small PR: mount the router with a label that
+**Compose is a job.** A live compose takes about 107 seconds — the
+Producer's LLM call is the long pole, and the render itself is only about
+two seconds. The service returns a job handle immediately and the caller
+polls `/api/music/jobs/{job_id}`. The quick operations — `preview`,
+`render`, `measure`, `anchors` — stay synchronous.
+
+Run it as a service:
+
+```bash
+docker build -t agentdaw .
+docker run --rm -p 8000:8000 -v "$PWD/out:/app/agentdaw_output" agentdaw
+```
+
+The Codexify-side wiring is a small PR: mount the route with a label that
 **must** be added to `config/supported_profiles/*.yaml` (unlisted labels
-are quarantined), and copy the skill into `~/.agents/skills/`.
+are quarantined), add the compose service, and copy the skill into
+`~/.agents/skills/`.
 
 ---
 

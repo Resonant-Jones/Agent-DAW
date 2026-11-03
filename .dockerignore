@@ -1,0 +1,17 @@
+.git
+.venv
+venv
+__pycache__
+*.py[cod]
+.pytest_cache
+*.egg-info
+out
+out_live
+tests
+codexify
+docs
+spec
+tools
+*.wav
+*.mid
+*.rpp

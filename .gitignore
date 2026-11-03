@@ -6,6 +6,9 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# Scratch working copies (e.g. the Codexify checkout used for a PR)
+.work/
+
 # Render output
 out/
 out_live/

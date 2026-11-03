@@ -1366,6 +1366,114 @@ def test_service_plugin_async_compose_returns_a_job_that_finishes(
     assert snapshot["error"] is None
 
 
+def test_a_job_remembers_the_context_it_was_started_with(tmp_path, monkeypatch):
+    """A job outlives the request that started it.
+
+    So it has to carry that request's context, or the host gets a result
+    it cannot attribute to the project and thread it asked for.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    envelope = _envelope("compose", {"brief": "a warm pad", "mode": "async"})
+    envelope["context"]["project_id"] = "17"
+    envelope["context"]["thread_id"] = "42"
+    body = client.post("/invoke", json=envelope).json()
+
+    assert body["ok"] is True
+    job_id = body["output"]["job_id"]
+
+    snapshot = {}
+    for _ in range(200):
+        snapshot = client.get(f"/jobs/{job_id}").json()
+        if snapshot["status"] != "running":
+            break
+        time.sleep(0.05)
+
+    assert snapshot["status"] == "succeeded", snapshot
+    assert snapshot["context"]["project_id"] == "17"
+    assert snapshot["context"]["thread_id"] == "42"
+
+
+def test_a_near_miss_lfo_target_does_not_lose_the_session():
+    """The model writes in its own words; the engine owns the vocabulary.
+
+    An LFO target it called "cutoff" should cost a synonym, not a session
+    the Artist waited two minutes for. The model is asked to correct
+    itself first -- this only runs when it could not.
+    """
+    from agentdaw.producer import LLMProducer
+
+    bad_spec = {
+        "version": "1.0",
+        "title": "Vocabulary",
+        "bpm": 120.0,
+        "key": "C minor",
+        "mode": "natural minor",
+        "bars": 8,
+        "time_signature": [4, 4],
+        "brief": {
+            "goal": "a test",
+            "deliverable": "8 bars",
+            "tempo": "120 BPM, 4/4",
+            "layers": "pad",
+            "midi_audio": "MIDI",
+            "length": "8 bars",
+            "energy": "low",
+            "structure": "intro, outro",
+            "movement": "still",
+            "production": "wide",
+            "variations": "none",
+            "locked": [],
+        },
+        "sections": [
+            {"id": "intro", "bars": 4, "energy": 0.3, "layers": ["pad"], "note": ""},
+            {"id": "outro", "bars": 4, "energy": 0.3, "layers": ["pad"], "note": ""},
+        ],
+        "patches": [
+            {
+                "id": "pad_warm",
+                "name": "Warm Pad",
+                "description": "wide",
+                "macros": {"body": 0.6, "brightness": 0.35, "motion": 0.5,
+                           "grit": 0.15, "space": 0.65, "size": 0.75},
+                "spectrum": {"brightness": 0.45, "odd_emphasis": 0.0,
+                             "even_emphasis": 0.0, "tilt": -0.25,
+                             "formant": 0.0, "partials": []},
+                "shape": {"attack": 0.5, "decay": 0.4, "sustain": 0.8, "release": 0.6},
+                # The model's word for "filter".
+                "lfo": {"rate": 0.2, "depth": 0.35, "target": "cutoff", "shape": "sine"},
+                "seed": 1,
+            }
+        ],
+        "tracks": [
+            {"id": "pad", "name": "Pad", "role": "harmony bed",
+             "kind": "synth", "patch_id": "pad_warm"}
+        ],
+    }
+
+    class _NeverLearns:
+        """A model that never fixes its vocabulary."""
+
+        def __init__(self):
+            self.calls = 0
+
+        def complete(self, *_a, **_k):
+            self.calls += 1
+            return json.dumps(bad_spec)
+
+    client = _NeverLearns()
+    producer = LLMProducer(client)
+
+    spec = producer.compose("a warm pad")
+
+    # The model was asked to correct itself first.
+    assert client.calls == 3, client.calls
+    # And the session exists anyway.
+    assert spec.patches[0].lfo.target == "filter"
+    assert spec.tracks[0].role == "chords"
+    assert spec.tracks[0].kind == "midi"
+
+
 def test_service_plugin_namespaces_artifacts_by_thread(tmp_path, monkeypatch):
     """The envelope carries a thread_id; artifacts should land under it."""
     client = _plugin_client(tmp_path, monkeypatch)

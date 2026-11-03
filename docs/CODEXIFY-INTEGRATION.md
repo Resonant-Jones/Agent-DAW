@@ -301,6 +301,32 @@ artifacts are split across `media_assets`, `generated_documents` /
 audio**, because it is the only one with a `media_kind` that includes
 `audio` and a project-scoped FK.
 
+### 4.1 The output root is a contract, not a convention
+
+The service writes into `AGENTDAW_OUT_ROOT` (`/app/agentdaw_output` in the
+image). The host bind-mounts a directory there, and the service reports
+artifact paths *inside* that root.
+
+Three things follow, and all three were got wrong before they were run:
+
+- **An explicit output directory is a name, not a location.** It is
+  resolved *under* the output root. Absolute paths, and paths that climb
+  out of the root, are refused with `invalid_request` -- a caller's
+  mistake, not an internal error, and not something to retry. An honoured
+  verbatim, the files land beside the mount, the service reports success,
+  and the DAW on the host cannot open one of them.
+- **The host has to mount the same directory at the same path.** The
+  backend registers an artifact by *reading* it, so the path the service
+  reports has to be a path the host can read. Same host directory, same
+  container path, on both services.
+- **The registration happens when the job is finished.** A compose takes
+  about 107 seconds, so it runs as a job; the artifacts only exist once it
+  completes. The job carries the context it was started with, so the host
+  can attribute the files to the project and thread that asked for them.
+
+The work has to belong to something: a compose that names no project is
+refused, because a session with nowhere to live is not a session.
+
 ---
 
 ## 5. How a turn actually flows
@@ -422,6 +448,7 @@ system.
 | The audition loop stays fast | `agentdaw/engine.py::render_preview`, under the session's drum bed, covered by a timing test |
 | A revision is a complete new state | `agentdaw/library.py::PatchLibrary.revise` records a new entry with a complete macro vector and its parent; the parent is never mutated |
 | An empty session is invalid | `SessionSpec.validate_references()` requires tracks, sections, and a patch for any MIDI track that has notes |
+| A near-miss word is not a lost session | The model is asked to correct itself first (`LLMProducer`'s repair loop). If it cannot, `normalise_vocabulary()` maps the model's own words onto the engine's -- "cutoff" is a filter target, "harmony bed" is a chords track -- rather than throwing away a session the Artist waited two minutes for |
 
 ---
 
@@ -440,23 +467,27 @@ system.
 
 **In Codexify, for path A (route-mounted):**
 
-- [ ] `guardian/routes/music_projects.py` -- thin wrapper over `build_router`
-- [ ] `_include_router(label="music_projects", ...)` in `guardian/guardian_api.py`
-- [ ] Add `music_projects` to `config/supported_profiles/*.yaml` -- **or it is quarantined**
-- [ ] Install the skill: `cp -R agentdaw/codexify/skills/music-producer ~/.agents/skills/`
-- [ ] Get `agentdaw` importable in the backend image (see section 9)
-- [ ] Alembic migration for the `music_projects` table
-- [ ] Register artifacts as `MediaAsset` after each render
+- [x] `guardian/routes/music_projects.py` -- thin wrapper over the service
+- [x] `_include_router(label="music_projects", ...)` in `guardian/guardian_api.py`
+- [x] A profile of its own in `config/supported_profiles/` -- the default
+      profile is byte-frozen, and an unlisted label is quarantined
+- [x] `guardian/skills/music-producer/SKILL.md` -- the behaviour
+- [x] Alembic migration for the `music_projects` table
+- [x] Register artifacts as `MediaAsset` when the job finishes
+- [ ] Mount the output root into the backend at the same path the service
+      writes it, or the registration cannot read the files
 - [ ] Mirror approved anchors into `VectorStore` under `project:{id}`
 
 **In Codexify, for path B (service plugin):**
 
-- [ ] `plugins/agentdaw/manifest.json` -- copy from this repo
-- [ ] A compose service for the image, plus a docker-compose service
-      named `agentdaw` so `base_url` resolves
+- [x] `plugins/agentdaw/manifest.json` -- validated against Codexify's
+      own `PluginManifest`
+- [x] An `agentdaw` compose service, behind a `music` profile, built from
+      this repository at a tagged release
+- [x] The same Alembic migration and `MediaAsset` registration as above --
+      a plugin does not change where state lives
 - [ ] Install the skill: `cp -R agentdaw/codexify/skills/music-producer ~/.agents/skills/`
-- [ ] The same Alembic migration, `MediaAsset` registration and anchor
-      mirroring as above -- a plugin does not change where state lives
+- [ ] Mirror approved anchors into `VectorStore` under `project:{id}`
 
 ---
 

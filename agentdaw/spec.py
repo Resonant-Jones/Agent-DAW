@@ -15,9 +15,184 @@ failure mode for LLM-driven DAW edits.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
+
+
+# --------------------------------------------------------------------------
+# Vocabulary
+#
+# The model writes in its own words. The engine owns the vocabulary, so a
+# near-miss is normalised onto the canonical term rather than treated as a
+# failure: losing a whole session because the model called an LFO target
+# "cutoff" is a bad trade for a parameter the engine was going to decide
+# anyway.
+#
+# This is a *fallback*, not a replacement for the repair loop. The model is
+# asked to correct itself first; this only runs when it could not.
+# --------------------------------------------------------------------------
+
+LFO_TARGET_ALIASES = {
+    "filter": "filter",
+    "cutoff": "filter",
+    "lowpass": "filter",
+    "low pass": "filter",
+    "lp": "filter",
+    "tone": "filter",
+    "timbre": "filter",
+    "brightness": "filter",
+    "pitch": "pitch",
+    "note": "pitch",
+    "detune": "pitch",
+    "vibrato": "pitch",
+    "amp": "amp",
+    "amplitude": "amp",
+    "volume": "amp",
+    "level": "amp",
+    "gain": "amp",
+    "pan": "pan",
+    "panning": "pan",
+    "position": "pan",
+    "stereo": "pan",
+}
+
+LFO_SHAPE_ALIASES = {
+    "sine": "sine",
+    "sin": "sine",
+    "sine wave": "sine",
+    "triangle": "triangle",
+    "tri": "triangle",
+    "saw": "saw",
+    "sawtooth": "saw",
+    "saw tooth": "saw",
+    "ramp": "saw",
+}
+
+TRACK_ROLE_ALIASES = {
+    "drums": "drums",
+    "drum": "drums",
+    "perc": "drums",
+    "percussion": "drums",
+    "beat": "drums",
+    "kit": "drums",
+    "bass": "bass",
+    "sub": "bass",
+    "sub bass": "bass",
+    "low end": "bass",
+    "chords": "chords",
+    "chord": "chords",
+    "pad": "chords",
+    "keys": "chords",
+    "keyboard": "chords",
+    "harmony": "chords",
+    "lead": "lead",
+    "melody": "lead",
+    "solo": "lead",
+    "texture": "texture",
+    "ambience": "texture",
+    "atmosphere": "texture",
+    "atmospheric": "texture",
+    "bed": "texture",
+    "air": "texture",
+    "fx": "fx",
+    "effect": "fx",
+    "riser": "fx",
+    "impact": "fx",
+    "sweep": "fx",
+}
+
+TRACK_KIND_ALIASES = {
+    "midi": "midi",
+    "synth": "midi",
+    "synthesised": "midi",
+    "synthesized": "midi",
+    "generated": "midi",
+    "audio": "audio",
+    "sample": "audio",
+    "wav": "audio",
+    "wave": "audio",
+    "rendered": "audio",
+    "recorded": "audio",
+    "stem": "audio",
+}
+
+
+def _canonical(value: Any, aliases: dict[str, str], default: str) -> str:
+    """Map the model's word onto the engine's, or fall back.
+
+    A phrase is matched whole first, and then by its leading words, so
+    "harmony bed" finds "harmony" without "bed" having to be in the
+    table.
+    """
+    if not isinstance(value, str):
+        return default
+    key = value.strip().lower()
+    if key in aliases:
+        return aliases[key]
+    words = key.split()
+    for count in range(len(words) - 1, 0, -1):
+        candidate = " ".join(words[:count])
+        if candidate in aliases:
+            return aliases[candidate]
+    return default
+
+
+def normalise_vocabulary(data: dict) -> dict:
+    """Return a copy of ``data`` with near-miss vocabulary canonicalised.
+
+    Only the fields the engine owns are touched. Everything else -- the
+    numbers, the names, the brief -- is left exactly as the model wrote
+    it.
+    """
+    if not isinstance(data, dict):
+        return data
+
+    out = dict(data)
+
+    patches = out.get("patches")
+    if isinstance(patches, list):
+        normalised_patches = []
+        for patch in patches:
+            if not isinstance(patch, dict):
+                normalised_patches.append(patch)
+                continue
+            patch = dict(patch)
+            lfo = patch.get("lfo")
+            if isinstance(lfo, dict):
+                lfo = dict(lfo)
+                if "target" in lfo:
+                    lfo["target"] = _canonical(
+                        lfo["target"], LFO_TARGET_ALIASES, "filter"
+                    )
+                if "shape" in lfo:
+                    lfo["shape"] = _canonical(
+                        lfo["shape"], LFO_SHAPE_ALIASES, "sine"
+                    )
+                patch["lfo"] = lfo
+            normalised_patches.append(patch)
+        out["patches"] = normalised_patches
+
+    tracks = out.get("tracks")
+    if isinstance(tracks, list):
+        normalised_tracks = []
+        for track in tracks:
+            if not isinstance(track, dict):
+                normalised_tracks.append(track)
+                continue
+            track = dict(track)
+            if "role" in track:
+                track["role"] = _canonical(
+                    track["role"], TRACK_ROLE_ALIASES, "texture"
+                )
+            if "kind" in track:
+                track["kind"] = _canonical(
+                    track["kind"], TRACK_KIND_ALIASES, "midi"
+                )
+            normalised_tracks.append(track)
+        out["tracks"] = normalised_tracks
+
+    return out
 
 
 # --------------------------------------------------------------------------

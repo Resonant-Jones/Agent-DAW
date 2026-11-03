@@ -23,7 +23,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from .llm import LLMClient, LLMError, LLMTruncated, extract_json
-from .spec import SessionSpec
+from .spec import SessionSpec, normalise_vocabulary
 
 # Constraints the artist states outright. These are enforced after the
 # fact, because a model told "120 BPM" will sometimes answer 88 BPM and
@@ -263,6 +263,7 @@ class LLMProducer:
         constraints = extract_constraints(vision) if feedback is None else {}
 
         last_error: Exception | None = None
+        last_data: dict | None = None
         budget = self.max_tokens
         truncation_retries = 0
 
@@ -274,6 +275,8 @@ class LLMProducer:
                     thinking_budget=self.thinking_budget,
                 )
                 data = extract_json(text)
+                if isinstance(data, dict):
+                    last_data = data
                 spec = SessionSpec.model_validate(data)
             except LLMTruncated as exc:
                 # Reasoning models share max_tokens between deliberation and
@@ -306,6 +309,24 @@ class LLMProducer:
                 continue
 
             return spec
+
+        # The model had its chances to correct itself and could not. The
+        # remaining failures are vocabulary -- an LFO target it called
+        # something else, a track role it named differently -- and the
+        # engine owns those terms. Canonicalising them is better than
+        # throwing away a session the Artist waited two minutes for.
+        if last_data is not None:
+            normalised = normalise_vocabulary(last_data)
+            if normalised != last_data:
+                try:
+                    spec = SessionSpec.model_validate(normalised)
+                except (ValidationError, ValueError):
+                    pass
+                else:
+                    errors = spec.validate_references()
+                    errors += check_constraints(spec, constraints)
+                    if not errors:
+                        return spec
 
         raise RuntimeError(f"Producer failed to produce a valid spec: {last_error}")
 

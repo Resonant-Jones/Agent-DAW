@@ -1425,6 +1425,61 @@ def test_the_router_compose_writes_where_the_host_asked(tmp_path, monkeypatch):
     assert (out_dir / "mix.wav").exists()
 
 
+def test_an_explicit_out_dir_lands_inside_the_output_root(tmp_path, monkeypatch):
+    """The host bind-mounts the output root; the artifacts must land there.
+
+    An explicit directory is a name, not a location. Honoured verbatim, the
+    artifacts land beside the mount, the service reports success, and the
+    DAW on the host cannot open a single file -- which is the failure this
+    whole bind-mount exists to prevent.
+    """
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post(
+        "/invoke",
+        json=_envelope("compose", {"brief": "a warm pad", "out_dir": "session"}),
+    ).json()
+
+    assert body["ok"] is True, body
+    artifacts = body["output"]["artifacts"]
+    assert artifacts, "compose should produce artifacts"
+
+    out_root = (tmp_path / "out").resolve()
+    for artifact in artifacts:
+        path = Path(artifact["path"]).resolve()
+        assert out_root in path.parents, f"{path} escaped {out_root}"
+    assert (out_root / "session").is_dir()
+
+
+def test_an_out_dir_cannot_escape_the_output_root(tmp_path, monkeypatch):
+    """A caller cannot write outside the directory the host is watching."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    body = client.post(
+        "/invoke",
+        json=_envelope("compose", {"brief": "a warm pad", "out_dir": "../escaped"}),
+    ).json()
+
+    assert body["ok"] is False, body
+    assert body["error"]["code"] == "invalid_request"
+    assert not (tmp_path / "escaped").exists()
+
+
+def test_an_absolute_out_dir_is_refused(tmp_path, monkeypatch):
+    """An absolute path is a location, and the output root is the only one."""
+    client = _plugin_client(tmp_path, monkeypatch)
+
+    target = tmp_path / "absolute-elsewhere"
+    body = client.post(
+        "/invoke",
+        json=_envelope("compose", {"brief": "a warm pad", "out_dir": str(target)}),
+    ).json()
+
+    assert body["ok"] is False, body
+    assert body["error"]["code"] == "invalid_request"
+    assert not target.exists()
+
+
 def test_the_openapi_schema_gives_every_route_a_request_body():
     """Codexify derives its model-callable tools from this schema.
 

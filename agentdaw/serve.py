@@ -205,6 +205,37 @@ _JOBS = _JobStore()
 # --------------------------------------------------------------------------
 
 
+class _InvalidOutDir(ValueError):
+    """A caller asked for a directory the output root does not contain.
+
+    A separate class because this is the caller's mistake, not the
+    service's: reporting it as an internal error would tell the host to
+    retry something that will never succeed.
+    """
+
+
+def _under_out_root(explicit: str) -> Path:
+    """Resolve a caller-supplied directory *under* the output root.
+
+    An explicit ``out_dir`` is a name, not a location. Resolving it under
+    the output root keeps every artifact inside the directory the host is
+    watching -- which is the whole point of the bind-mount -- and keeps a
+    caller from writing wherever it happens to please.
+    """
+    candidate = Path(explicit)
+    if candidate.is_absolute():
+        raise _InvalidOutDir(
+            f"out_dir must be relative to the output root, not absolute: {explicit!r}"
+        )
+    root = DEFAULT_OUT_ROOT.resolve()
+    target = (root / candidate).resolve()
+    if target != root and root not in target.parents:
+        raise _InvalidOutDir(
+            f"out_dir escapes the output root: {explicit!r}"
+        )
+    return target
+
+
 def _out_dir_for(context: dict[str, Any] | None, explicit: str | None) -> str:
     """Where this call's artifacts go.
 
@@ -212,9 +243,14 @@ def _out_dir_for(context: dict[str, Any] | None, explicit: str | None) -> str:
     land somewhere it can attribute to that thread, so they are namespaced
     by it. Otherwise the host's explicit choice wins, and failing that a
     plain directory.
+
+    Every one of those lands under the output root, because that root is
+    what the host bind-mounts. An explicit directory that escaped it would
+    put the stems where the host cannot open them -- and report success
+    while doing it.
     """
     if explicit:
-        return explicit
+        return str(_under_out_root(explicit))
     thread_id = (context or {}).get("thread_id")
     if thread_id:
         return str(DEFAULT_OUT_ROOT / str(thread_id))
@@ -337,6 +373,8 @@ def build_app(out_root: str | Path | None = None):
             output = _dispatch(job.action, payload, context)
         except _UnsupportedAction as exc:
             jobs.finish(job, None, {"code": "unsupported_operation", "message": str(exc), "retryable": False})
+        except _InvalidOutDir as exc:
+            jobs.finish(job, None, {"code": "invalid_request", "message": str(exc), "retryable": False})
         except KeyError as exc:
             jobs.finish(
                 job,
@@ -406,6 +444,8 @@ def build_app(out_root: str | Path | None = None):
             output = _dispatch(request.action, payload, context)
         except _UnsupportedAction as exc:
             return _error("unsupported_operation", str(exc))
+        except _InvalidOutDir as exc:
+            return _error("invalid_request", str(exc))
         except KeyError as exc:
             return _error("not_found", str(exc))
         except Exception as exc:  # noqa: BLE001

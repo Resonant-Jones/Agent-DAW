@@ -122,6 +122,11 @@ class PluginInvokeContext(BaseModel):
     request_id: str | None = None
     thread_id: str | None = None
     user_id: str | None = None
+    #: The host's own object this work belongs to. The service does not
+    #: interpret it -- it cannot, it does not know the host's data model --
+    #: but it carries it back on the job so the host can attribute what it
+    #: gets to what it asked for.
+    project_id: str | None = None
 
 
 class PluginInvokeRequest(BaseModel):
@@ -141,14 +146,28 @@ class PluginInvokeRequest(BaseModel):
 class _Job:
     """One asynchronous unit of work."""
 
-    __slots__ = ("id", "action", "status", "output", "error", "created_at", "finished_at")
+    __slots__ = (
+        "id",
+        "action",
+        "status",
+        "output",
+        "error",
+        "context",
+        "created_at",
+        "finished_at",
+    )
 
-    def __init__(self, action: str) -> None:
+    def __init__(self, action: str, context: dict[str, Any] | None = None) -> None:
         self.id = uuid.uuid4().hex
         self.action = action
         self.status = "running"
         self.output: dict[str, Any] | None = None
         self.error: dict[str, Any] | None = None
+        #: What the caller asked for, remembered so the caller can be told
+        #: again when it comes back for the result. A job that outlives the
+        #: request that started it has to carry the request's context, or
+        #: the host cannot attribute what it gets.
+        self.context: dict[str, Any] = dict(context or {})
         self.created_at = time.time()
         self.finished_at: float | None = None
 
@@ -159,6 +178,7 @@ class _Job:
             "status": self.status,
             "output": self.output,
             "error": self.error,
+            "context": dict(self.context),
             "created_at": self.created_at,
             "finished_at": self.finished_at,
         }
@@ -173,8 +193,8 @@ class _JobStore:
         self._max = max_jobs
         self._lock = threading.Lock()
 
-    def create(self, action: str) -> _Job:
-        job = _Job(action)
+    def create(self, action: str, context: dict[str, Any] | None = None) -> _Job:
+        job = _Job(action, context)
         with self._lock:
             self._jobs[job.id] = job
             self._order.append(job.id)
@@ -432,7 +452,7 @@ def build_app(out_root: str | Path | None = None):
         payload = dict(request.input or {})
 
         if str(payload.get("mode") or "sync").lower() == "async":
-            job = jobs.create(request.action)
+            job = jobs.create(request.action, context)
             pool.submit(_run_job, job, payload, context)
             return {
                 "ok": True,

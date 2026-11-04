@@ -169,17 +169,27 @@ the table is small and is almost always reached by `project_id`.
 - `guardian/routes/music_projects.py` imports cleanly against the real
   `guardian` package and produces an OpenAPI schema with no parameter
   demoted to a query string.
-- 14 new tests pass, and the supported-profile, command-bus, config and
+- The `PgDB` methods **run against a live Postgres**: upsert, read, list,
+  delete, the complete-state write (an omitted value is cleared, not
+  merged), and the foreign key actually rejecting an orphan.
+- The route **has been exercised against a live Agent-DAW service**, over
+  real HTTP, with the real model in the loop: `compose` returns a job
+  handle, the job succeeds, the job comes back carrying the project and
+  thread it was started with, and the produced files are registered as
+  `MediaAsset` rows in a live database.
+- The bind-mount **delivers**: rendering through the container puts the
+  stems, the MIDI and both REAPER projects in the host's directory, where
+  the DAW can open them.
+- 22 new tests pass, and the supported-profile, command-bus, config and
   architecture suites still pass.
 
 **Not verified:**
 
-- The `PgDB` methods have not been executed against a live Postgres. The
-  SQL follows the surrounding methods' idiom, but "follows the idiom" is
-  not "runs".
-- The route has never been exercised against a live Agent-DAW service.
-  The forwarding is tested against a stubbed transport; the two halves
-  have not been run together.
+- The `PgDB` methods were exercised against a disposable Postgres, not
+  against the host's own database.
+- `MediaAsset` registration was verified end to end with the host's
+  `media_identity` service and its own model, but the row has not been
+  read back through the media library UI.
 
 ## The latency constraint that shapes the host integration
 

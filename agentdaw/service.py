@@ -74,9 +74,19 @@ class Artifact(dict):
 def _content_hash(path: Path) -> str | None:
     """sha256 of a produced file.
 
-    The host needs this to register the file in its own media registry,
-    and it is cheaper to compute it here, while the bytes are already
-    in hand, than to have the host read every stem back off disk.
+    The Producer owns one fact here: the hash of the bytes it actually
+    wrote to disk. That is worth reporting, and the host can use it as a
+    cross-check -- the host reads the file anyway to register it, so it
+    can hash the bytes itself and compare.
+
+    What the hash is **not** is the identity. The host owns identity:
+    `media_assets` has a unique index on
+    `(project_id, media_kind, provenance, content_hash)`, so whatever
+    lands in that column is part of the registry's identity forever. If
+    the host took the Producer's claim as that identity, a wrong claim
+    would become permanent, and the same file registered twice could
+    become two rows. The host hashes the bytes it holds and treats this
+    as a claim about them.
     """
     try:
         digest = hashlib.sha256()

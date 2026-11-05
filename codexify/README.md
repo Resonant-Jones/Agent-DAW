@@ -421,6 +421,10 @@ by `project_id`.
   `test_media_routes.py`, `test_media_upload.py` and `test_media_identity.py`.
   The live chain against a live Postgres and a live Agent-DAW service
   registers **7 of 7** artifacts, 0 failing checks.
+- That chain was re-run end to end against the **v0.1.6** engine -- the
+  tag PR #1005 pins -- with the fixed route in front of it: 7 artifacts
+  produced, **7 of 7** registered, 0 failing checks, and every file's
+  size on disk matching the size the Producer reported.
 - The engine's context echo was measured on images **built from the git
   tags the way compose builds them** -- `v0.1.2` answers `"context": null`,
   `v0.1.5` answers with the context it was given. No model call and no

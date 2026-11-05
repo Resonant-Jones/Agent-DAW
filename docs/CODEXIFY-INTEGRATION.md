@@ -617,6 +617,19 @@ system.
   REAPER-driven render cannot be unattended on an unlicensed install.
   This does not affect the Codexify integration: Agent-DAW renders the
   stems itself, and REAPER is where the Artist takes over.
+- **Touching `docker-compose.yml` wakes Codexify's whole frontend test
+  suite, and that suite is flaky.** `docker-compose.yml` is in the
+  workflow's `shared` path filter, so a compose change sets
+  `run_frontend=true` -- and the frontend job then runs all 233 test
+  files instead of the four seconds it takes when it skips. The
+  intermittent failure lives in the chat tests
+  (`frontend/src/features/chat/__tests__/GuardianChat.turn-lock-lifecycle.test.tsx`
+  and neighbours); it is load-dependent, the failing file moves between
+  runs, and it predates this work -- PR #1000 failed the same file on
+  its first commit. It is not caused by the music surface, and it is
+  worth knowing about before changing the compose file: expect the
+  frontend job to run, and expect it to be red for reasons that have
+  nothing to do with the change.
 
 ### 9.1 What the live run found that the tests could not
 

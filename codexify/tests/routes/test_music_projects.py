@@ -335,6 +335,67 @@ def test_a_compose_without_a_project_is_refused(music_client):
     assert response.status_code == 422
 
 
+def test_a_registration_that_does_not_commit_is_not_a_registration(
+    monkeypatch, tmp_path
+):
+    """The row has to survive the session closing.
+
+    ``get_session()`` hands back a plain SQLAlchemy ``Session``, and
+    closing one rolls back anything uncommitted. A registration that
+    flushes but never commits reports success and leaves nothing behind
+    -- which is the worst shape a bug can have: it looks like it worked.
+    """
+    from guardian.routes import music_projects
+
+    calls = []
+
+    class _Session:
+        def add(self, _asset):
+            calls.append("add")
+
+        def flush(self):
+            calls.append("flush")
+
+        def commit(self):
+            calls.append("commit")
+
+    class _Db:
+        def get_session(self):
+            return _SessionContext(_Session())
+
+    class _SessionContext:
+        def __init__(self, session):
+            self._session = session
+
+        def __enter__(self):
+            return self._session
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(music_projects, "_media_db", lambda: _Db())
+
+    artifact = tmp_path / "mix.wav"
+    artifact.write_bytes(b"RIFF....WAVEfmt ")
+
+    registered = music_projects.register_artifacts(
+        [
+            {
+                "path": str(artifact),
+                "media_kind": "audio",
+                "mime_type": "audio/wav",
+                "provenance": "generated",
+                "bytes": artifact.stat().st_size,
+            }
+        ],
+        project_id=1,
+        user_id="local",
+    )
+
+    assert len(registered) == 1
+    assert "commit" in calls, calls
+
+
 def test_a_finished_job_registers_its_files(monkeypatch, music_client):
     """The service made the files; the host decides what they are called.
 
@@ -456,6 +517,86 @@ def test_a_failed_registration_does_not_fail_the_job(monkeypatch, music_client):
 
     assert response.status_code == 200
     assert response.json()["status"] == "succeeded"
+
+
+# --------------------------------------------------------------------------
+# The whole-state write
+#
+# `current_spec` is a record of what the Producer produced, written whole.
+# A partial write that merged would silently resurrect values the Artist
+# already changed -- so it has to clear them, and that has to be proven
+# against a real database rather than asserted about a mock.
+# --------------------------------------------------------------------------
+
+
+def test_a_whole_state_write_replaces_and_a_partial_one_clears():
+    """A revision replaces the state; it does not merge into it.
+
+    Writing the full state, then writing only part of it, must leave the
+    omitted columns null. A merge would resurrect values the Artist had
+    already changed -- and the write would still look like it worked.
+    """
+    import os
+    import uuid
+
+    import psycopg
+    from psycopg import sql
+
+    admin = os.environ.get("TEST_DATABASE_URL", "").strip()
+    if not admin:
+        pytest.skip("a disposable PostgreSQL is required for this proof")
+
+    name = "music_state_" + uuid.uuid4().hex
+    with psycopg.connect(admin, autocommit=True) as conn:
+        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
+    info = psycopg.conninfo.conninfo_to_dict(admin)
+    info["dbname"] = name
+
+    from sqlalchemy.engine import URL
+
+    migration_url = URL.create(
+        "postgresql+psycopg",
+        username=info.get("user"),
+        password=info.get("password"),
+        host=info.get("host"),
+        port=int(info.get("port", 5432)),
+        database=name,
+    ).render_as_string(hide_password=False)
+
+    try:
+        from guardian.core.pgdb import PgDB
+        from tests.services.test_memory_vault_read_projection import _migrate_to_head
+
+        _migrate_to_head(migration_url)
+
+        db = PgDB(migration_url.replace("postgresql+psycopg://", "postgresql://", 1))
+
+        project_id = db.create_project("music state proof", "proof")
+        db.upsert_music_project(
+            project_id,
+            bpm=120.0,
+            musical_key="C minor",
+            bars=8,
+            current_spec={"title": "first"},
+        )
+
+        full = db.get_music_project(project_id)
+        assert full["bpm"] == 120.0
+        assert full["musical_key"] == "C minor"
+        assert full["current_spec"] == {"title": "first"}
+
+        # A partial write is a new complete state, not a patch.
+        db.upsert_music_project(project_id, bpm=90.0)
+        partial = db.get_music_project(project_id)
+        assert partial["bpm"] == 90.0
+        assert partial["musical_key"] is None, "a partial write merged instead of replacing"
+        assert partial["bars"] is None
+        assert partial["current_spec"] is None
+    finally:
+        with psycopg.connect(admin, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
+            )
 
 
 # --------------------------------------------------------------------------

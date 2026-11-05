@@ -28,7 +28,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 
 | Path | What it is |
 |---|---|
-| `music-projects.patch` | A unified diff against four existing Codexify files |
+| `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -149,11 +149,15 @@ The separate-table shape has precedent: `media_assets` is already a
 project-scoped side table with a `project_id` foreign key and a nullable
 `thread_id`. `music_projects` mirrors that exactly, 1:1 with `projects`.
 
-`current_spec` holds the complete session state and is the source of
-truth. The scalar columns beside it (`bpm`, `musical_key`, `bars`, ...)
-are a queryable projection of the same values -- "every project at 120
-BPM" should not mean parsing JSON. They are deliberately not indexed:
-the table is small and is almost always reached by `project_id`.
+`current_spec` holds the complete session state as the Producer produced
+it, and it is a *record* of that state rather than a second truth about
+it: the Producer owns the specification, and this column is what this
+side keeps of it. It is written whole and never field-patched, so a
+revision replaces the whole state. The scalar columns beside it (`bpm`,
+`musical_key`, `bars`, ...) are a queryable projection of the same values
+-- "every project at 120 BPM" should not mean parsing JSON. They are
+deliberately not indexed: the table is small and is almost always reached
+by `project_id`.
 
 ## What has been verified, and what has not
 
@@ -180,7 +184,10 @@ the table is small and is almost always reached by `project_id`.
 - The bind-mount **delivers**: rendering through the container puts the
   stems, the MIDI and both REAPER projects in the host's directory, where
   the DAW can open them.
-- 22 new tests pass, and the supported-profile, command-bus, config and
+- The whole-state write **replaces** rather than merges, against a live
+  database: a partial write clears the columns it omits. The test fails if
+  the upsert is given merge semantics.
+- 24 new tests pass, and the supported-profile, command-bus, config and
   architecture suites still pass.
 
 **Not verified:**

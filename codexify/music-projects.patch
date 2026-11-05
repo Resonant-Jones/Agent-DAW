@@ -1,6 +1,13 @@
+# The Codexify-side Music Producer patch, as merged.
+#
+# PR #988 (feat(music): add the Music Producer surface), merged 2026-11-04.
+# PR #997 (docs(music): make the two descriptions of current_spec say the same thing), merged 2026-11-04.
+#
+# Apply onto the commit before 69ef035a (the base PR #988 was cut from).
+
 diff --git a/config/supported_profiles/v1-music-producer.yaml b/config/supported_profiles/v1-music-producer.yaml
 new file mode 100644
-index 00000000..133639dd
+index 000000000..133639ddf
 --- /dev/null
 +++ b/config/supported_profiles/v1-music-producer.yaml
 @@ -0,0 +1,153 @@
@@ -158,7 +165,7 @@ index 00000000..133639dd
 +      - websocket
 +      - cron
 diff --git a/docker-compose.yml b/docker-compose.yml
-index 2043a0da..4152061a 100644
+index 2043a0da6..4152061ad 100644
 --- a/docker-compose.yml
 +++ b/docker-compose.yml
 @@ -290,6 +290,12 @@ services:
@@ -225,10 +232,10 @@ index 2043a0da..4152061a 100644
      # NOTE: We run the dev UI using an official Node image so we always have /bin/sh.
      # This avoids breakage if the local ./frontend Dockerfile was refactored into a distroless image.
 diff --git a/guardian/core/pgdb.py b/guardian/core/pgdb.py
-index 50574a98..462b722c 100644
+index 50574a986..462b722cc 100644
 --- a/guardian/core/pgdb.py
 +++ b/guardian/core/pgdb.py
-@@ -1389,6 +1389,121 @@ class PgDB(ChatDB):
+@@ -1389,6 +1389,121 @@ def ensure_default_project(self) -> int:
              raise RuntimeError("Unable to resolve default project")
          return project_id
  
@@ -352,7 +359,7 @@ index 50574a98..462b722c 100644
              with conn.cursor() as cur:
 diff --git a/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py b/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py
 new file mode 100644
-index 00000000..99b52957
+index 000000000..99b529577
 --- /dev/null
 +++ b/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py
 @@ -0,0 +1,93 @@
@@ -450,7 +457,7 @@ index 00000000..99b52957
 +    """Downgrade schema."""
 +    op.drop_table("music_projects")
 diff --git a/guardian/db/models.py b/guardian/db/models.py
-index 756cd49f..35cb39e4 100644
+index 756cd49f9..35cb39e4f 100644
 --- a/guardian/db/models.py
 +++ b/guardian/db/models.py
 @@ -1083,6 +1083,66 @@ class Project(Base):
@@ -521,10 +528,10 @@ index 756cd49f..35cb39e4 100644
  # Repository Bindings (Stage 2K.1 / ADR-065)
  # =========================
 diff --git a/guardian/guardian_api.py b/guardian/guardian_api.py
-index f92802e1..1be3bf47 100644
+index f92802e1b..1be3bf474 100644
 --- a/guardian/guardian_api.py
 +++ b/guardian/guardian_api.py
-@@ -504,6 +504,7 @@ from guardian.routes import command_bus as command_bus_routes
+@@ -504,6 +504,7 @@ def _retrieval_proof_state(
  from guardian.routes import configuration_inspector
  from guardian.routes import connections as connections_routes
  from guardian.routes import continuity_operator
@@ -557,7 +564,7 @@ index f92802e1..1be3bf47 100644
  def _include_browser_host_attachment_router() -> None:
      # Keep this development seam out of the supported profile and beta-core
      # route inventory.  The remaining three gates are evaluated before a
-@@ -1339,6 +1358,12 @@ _include_router(
+@@ -1339,6 +1358,12 @@ def _include_admin_surface() -> None:
      include_fn=lambda: app.include_router(media_router, prefix="/api/media"),
      core_surface=True,
  )
@@ -572,10 +579,10 @@ index f92802e1..1be3bf47 100644
      flag_name="CODEXIFY_VOICE_ROUTES_ENABLED",
 diff --git a/guardian/routes/music_projects.py b/guardian/routes/music_projects.py
 new file mode 100644
-index 00000000..3eb49fb1
+index 000000000..619c26d42
 --- /dev/null
 +++ b/guardian/routes/music_projects.py
-@@ -0,0 +1,778 @@
+@@ -0,0 +1,783 @@
 +"""
 +Music Project Routes
 +~~~~~~~~~~~~~~~~~~~~~
@@ -1338,6 +1345,11 @@ index 00000000..3eb49fb1
 +        with db.get_session() as session:
 +            session.add(asset)
 +            session.flush()
++            # The session is a plain SQLAlchemy Session: closing it rolls
++            # back anything uncommitted, so the row has to be committed
++            # here or it never existed. The flush alone would let this
++            # function report a registration that did not happen.
++            session.commit()
 +
 +        registered.append(
 +            {
@@ -1356,7 +1368,7 @@ index 00000000..3eb49fb1
 +    return registered
 diff --git a/guardian/skills/music-producer/SKILL.md b/guardian/skills/music-producer/SKILL.md
 new file mode 100644
-index 00000000..5cecaad5
+index 000000000..5cecaad5e
 --- /dev/null
 +++ b/guardian/skills/music-producer/SKILL.md
 @@ -0,0 +1,94 @@
@@ -1456,7 +1468,7 @@ index 00000000..5cecaad5
 +work the Artist has already approved -- treat it as canonical.
 diff --git a/plugins/agentdaw/manifest.json b/plugins/agentdaw/manifest.json
 new file mode 100644
-index 00000000..3344d12d
+index 000000000..3344d12d1
 --- /dev/null
 +++ b/plugins/agentdaw/manifest.json
 @@ -0,0 +1,3 @@
@@ -1465,10 +1477,10 @@ index 00000000..3344d12d
 +size 623
 diff --git a/tests/routes/test_music_projects.py b/tests/routes/test_music_projects.py
 new file mode 100644
-index 00000000..80d90fb5
+index 000000000..ae1704633
 --- /dev/null
 +++ b/tests/routes/test_music_projects.py
-@@ -0,0 +1,604 @@
+@@ -0,0 +1,665 @@
 +"""Tests for the Music Project routes and the Agent-DAW service seam.
 +
 +These are written to discriminate. The route's whole job is to be
@@ -1806,6 +1818,67 @@ index 00000000..80d90fb5
 +    assert response.status_code == 422
 +
 +
++def test_a_registration_that_does_not_commit_is_not_a_registration(
++    monkeypatch, tmp_path
++):
++    """The row has to survive the session closing.
++
++    ``get_session()`` hands back a plain SQLAlchemy ``Session``, and
++    closing one rolls back anything uncommitted. A registration that
++    flushes but never commits reports success and leaves nothing behind
++    -- which is the worst shape a bug can have: it looks like it worked.
++    """
++    from guardian.routes import music_projects
++
++    calls = []
++
++    class _Session:
++        def add(self, _asset):
++            calls.append("add")
++
++        def flush(self):
++            calls.append("flush")
++
++        def commit(self):
++            calls.append("commit")
++
++    class _Db:
++        def get_session(self):
++            return _SessionContext(_Session())
++
++    class _SessionContext:
++        def __init__(self, session):
++            self._session = session
++
++        def __enter__(self):
++            return self._session
++
++        def __exit__(self, *_exc):
++            return False
++
++    monkeypatch.setattr(music_projects, "_media_db", lambda: _Db())
++
++    artifact = tmp_path / "mix.wav"
++    artifact.write_bytes(b"RIFF....WAVEfmt ")
++
++    registered = music_projects.register_artifacts(
++        [
++            {
++                "path": str(artifact),
++                "media_kind": "audio",
++                "mime_type": "audio/wav",
++                "provenance": "generated",
++                "bytes": artifact.stat().st_size,
++            }
++        ],
++        project_id=1,
++        user_id="local",
++    )
++
++    assert len(registered) == 1
++    assert "commit" in calls, calls
++
++
 +def test_a_finished_job_registers_its_files(monkeypatch, music_client):
 +    """The service made the files; the host decides what they are called.
 +
@@ -2073,3 +2146,140 @@ index 00000000..80d90fb5
 +        else:
 +            os.environ["CODEXIFY_SUPPORTED_PROFILE"] = original
 +        importlib.reload(guardian_api)
+
+diff --git a/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py b/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py
+index 99b529577..c42e91d68 100644
+--- a/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py
++++ b/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py
+@@ -19,12 +19,16 @@
+ key and the foreign key, so attaching a Music Project to a Project and
+ detaching it are the same operation.
+ 
+-``current_spec`` is the complete session state and is the source of
+-truth.  The scalar columns beside it are a queryable projection of the
+-same values -- "every project at 120 BPM" is a question worth asking,
+-and asking it should not mean parsing JSON.  They are not indexed
+-because the table is small and is almost always reached by
+-``project_id``.
++``current_spec`` is the complete session state as the Producer produced
++it, and it is a *record* of that state rather than a second truth about
++it.  The Producer owns the specification; this column is what this side
++keeps of it.  It is written whole and never field-patched, so a revision
++replaces the whole state rather than merging into it.
++
++The scalar columns beside it are a queryable projection of the same
++values -- "every project at 120 BPM" is a question worth asking, and
++asking it should not mean parsing JSON.  They are not indexed because
++the table is small and is almost always reached by ``project_id``.
+ """
+ 
+ from __future__ import annotations
+diff --git a/guardian/routes/music_projects.py b/guardian/routes/music_projects.py
+index 619c26d42..b387348ee 100644
+--- a/guardian/routes/music_projects.py
++++ b/guardian/routes/music_projects.py
+@@ -36,6 +36,13 @@
+ the music should be -- tempo, key, bars, the spec itself -- is derived
+ by the Producer and written back complete, never patched field by field,
+ because a revision replaces the whole state.
++
++``music_projects.current_spec`` is therefore a whole-state *record* of
++what the Producer produced, not an independent truth about the music.
++It is written whole. When the Artist edits the ``.rpp`` in REAPER after
++the handoff, the two disagree, and until that is reconciled the
++Producer's specification is the authority on what the music is -- the
++column records where it was at handoff, not where it is now.
+ """
+ 
+ import logging
+diff --git a/tests/routes/test_music_projects.py b/tests/routes/test_music_projects.py
+index ae1704633..1d2234ba6 100644
+--- a/tests/routes/test_music_projects.py
++++ b/tests/routes/test_music_projects.py
+@@ -519,6 +519,86 @@ def _boom(*_a, **_k):
+     assert response.json()["status"] == "succeeded"
+ 
+ 
++# --------------------------------------------------------------------------
++# The whole-state write
++#
++# `current_spec` is a record of what the Producer produced, written whole.
++# A partial write that merged would silently resurrect values the Artist
++# already changed -- so it has to clear them, and that has to be proven
++# against a real database rather than asserted about a mock.
++# --------------------------------------------------------------------------
++
++
++def test_a_whole_state_write_replaces_and_a_partial_one_clears():
++    """A revision replaces the state; it does not merge into it.
++
++    Writing the full state, then writing only part of it, must leave the
++    omitted columns null. A merge would resurrect values the Artist had
++    already changed -- and the write would still look like it worked.
++    """
++    import os
++    import uuid
++
++    import psycopg
++    from psycopg import sql
++
++    admin = os.environ.get("TEST_DATABASE_URL", "").strip()
++    if not admin:
++        pytest.skip("a disposable PostgreSQL is required for this proof")
++
++    name = "music_state_" + uuid.uuid4().hex
++    with psycopg.connect(admin, autocommit=True) as conn:
++        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(name)))
++    info = psycopg.conninfo.conninfo_to_dict(admin)
++    info["dbname"] = name
++
++    from sqlalchemy.engine import URL
++
++    migration_url = URL.create(
++        "postgresql+psycopg",
++        username=info.get("user"),
++        password=info.get("password"),
++        host=info.get("host"),
++        port=int(info.get("port", 5432)),
++        database=name,
++    ).render_as_string(hide_password=False)
++
++    try:
++        from guardian.core.pgdb import PgDB
++        from tests.services.test_memory_vault_read_projection import _migrate_to_head
++
++        _migrate_to_head(migration_url)
++
++        db = PgDB(migration_url.replace("postgresql+psycopg://", "postgresql://", 1))
++
++        project_id = db.create_project("music state proof", "proof")
++        db.upsert_music_project(
++            project_id,
++            bpm=120.0,
++            musical_key="C minor",
++            bars=8,
++            current_spec={"title": "first"},
++        )
++
++        full = db.get_music_project(project_id)
++        assert full["bpm"] == 120.0
++        assert full["musical_key"] == "C minor"
++        assert full["current_spec"] == {"title": "first"}
++
++        # A partial write is a new complete state, not a patch.
++        db.upsert_music_project(project_id, bpm=90.0)
++        partial = db.get_music_project(project_id)
++        assert partial["bpm"] == 90.0
++        assert partial["musical_key"] is None, "a partial write merged instead of replacing"
++        assert partial["bars"] is None
++        assert partial["current_spec"] is None
++    finally:
++        with psycopg.connect(admin, autocommit=True) as conn:
++            conn.execute(
++                sql.SQL("DROP DATABASE {} WITH (FORCE)").format(sql.Identifier(name))
++            )
++
++
+ # --------------------------------------------------------------------------
+ # The model and the migration describe the same table
+ # --------------------------------------------------------------------------

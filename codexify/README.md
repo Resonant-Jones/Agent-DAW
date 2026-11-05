@@ -29,6 +29,8 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | Path | What it is |
 |---|---|
 | `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files |
+| `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, not yet merged |
+| `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, not yet merged |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -55,6 +57,16 @@ mkdir -p guardian/skills/music-producer
 cp codexify/guardian/skills/music-producer/SKILL.md guardian/skills/music-producer/
 cp codexify/tests/routes/test_music_projects.py tests/routes/
 ```
+
+If you want the artifact-registration fix and the ADR-108 pointer as
+well:
+
+```bash
+git apply codexify/music-registration-fix.patch
+git apply codexify/adr-108-authority-pointer.patch
+```
+
+Both are separate PRs, so they apply independently of each other.
 
 Then start the engine:
 
@@ -112,16 +124,26 @@ the only one of the three registries with a `media_kind` that includes
 media_identity.py::compute_identity` already implements them.
 `register_artifacts()` calls that function rather than reimplementing
 it, so the rules cannot drift. Agent-DAW supplies only the facts it
-owns: the path, the media kind, the mime type, the byte count, and the
-content hash.
+owns: the path, the media kind, the mime type and the byte count.
 
-The content hash is computed by the Producer while the bytes are already
-in hand, so the host does not read every stem back off disk just to
-hash it. It is the hash of the bytes *actually written to disk*, not of
-what was rendered in memory -- otherwise the registry would index
-something the Artist never heard.
+**The content hash is the host's too.** The Producer reports a hash for
+each file it produced, and the host reads the bytes anyway -- so the
+host hashes them itself and treats the Producer's hash as a claim. If
+they disagree, the bytes win and the disagreement is logged. Taking the
+Producer's hash as the identity would let a wrong hash become the row's
+identity, and two registrations of the same file would then become two
+rows.
 
-Verified end to end against the real checkout: a render produces eight
+This was one of three defects found by running the whole chain against a
+live database rather than a mock -- see
+[`music-registration-fix.patch`](#the-one-bug-the-review-could-not-see)
+below.
+
+The hash is of the bytes *actually written to disk*, not of what was
+rendered in memory -- otherwise the registry would index something the
+Artist never heard.
+
+Verified end to end against the real checkout: a render produces seven
 artifacts, each one becomes a `MediaAsset` row whose NOT NULL columns
 and CHECK constraints are satisfied, and audio lands under the `audio/`
 storage prefix:
@@ -132,6 +154,91 @@ normalized_slug  : pad
 system_name      : 20261030-7d126d8f--pad.wav
 storage_prefix   : audio/
 ```
+
+## The one bug the review could not see
+
+PR #988 merged with 24 passing tests and an OpenAPI schema that
+described the surface correctly. Then the whole chain was run against a
+live Postgres and a live Agent-DAW service, and:
+
+```
+[FAIL] MediaAsset rows were created -- 1
+[FAIL] every artifact was registered -- 1 of 7
+```
+
+**One** of the seven files a render produces was registered, and the
+route reported success. Three defects, all silent:
+
+1. `asset.id` was read *after* the session that committed the row had
+   closed. Committing expires the instance's attributes, and a closed
+   session cannot refresh them, so the read raised
+   `DetachedInstanceError` -- on the first artifact, every time. The
+   exception was swallowed by the route's log-and-continue.
+2. The loop had no per-artifact isolation, so one failure aborted every
+   artifact after it.
+3. Registration was not idempotent. A finished job can be polled more
+   than once, and the second poll collided with the unique index
+   `uq_media_assets_active_identity`, taking the rest of the session
+   with it.
+
+The test that was supposed to guard this path used a **fake session**:
+
+```python
+class _Session:
+    def add(self, _asset): calls.append("add")
+    def flush(self): calls.append("flush")
+    def commit(self): calls.append("commit")
+```
+
+A fake session has no attribute expiry, no commit semantics and no
+unique constraint. It asserted that `commit` was *called* -- and
+`commit` was called. The bug was three lines later.
+
+ADR-108 requires the artifact-custody assertion to be proven against a
+real database, so the replacement tests use a **disposable PostgreSQL**.
+Reverting only the route to `main`, with the new tests unchanged, fails
+all five:
+
+```
+FAILED test_a_registration_that_does_not_commit_is_not_a_registration
+FAILED test_every_produced_file_is_registered_not_just_the_first
+FAILED test_registering_the_same_file_twice_is_one_row
+FAILED test_the_host_hashes_the_bytes_rather_than_trusting_the_producer
+FAILED test_artifacts_are_registered_against_a_project_with_no_thread
+```
+
+With the fix, the same live chain reports **7 of 7 registered, 0 failing
+checks**. That is PR #1003.
+
+## The authority boundary, and where it is recorded
+
+Codexify's own `docs/architecture/adr/108-codexify-music-producer-authority-and-agentdaw-service-boundary.md`
+records the four-party split:
+
+| Party | Owns |
+|---|---|
+| Codexify | identity, project containment, the durable record of musical state, artifact custody, the permission gate |
+| Agent-DAW | the specification and the render |
+| REAPER | DAW and timeline state, in the handoff artifact |
+| the Artist | intent, locked values, acceptance |
+
+Two things in it are worth repeating here because they are easy to get
+backwards:
+
+- **`current_spec` is a record, not a second truth.** The Producer owns the
+  specification; the column is what Codexify keeps of it. It is written
+  whole and never field-patched, so a revision replaces the whole state.
+- **Codexify owns no normalized composition schema.** An earlier draft
+  proposed `studio_arrangements` / `studio_tracks` tables in Codexify
+  Postgres. That was withdrawn as a duplicate truth plane over
+  Agent-DAW's published specification contract. The composition truth
+  already exists, and Agent-DAW owns it.
+
+ADR-108's follow-through list asked for `docs/Future-Features/PLAN.md` to
+point at the ADR, "so the plan and the ADR do not drift" -- the Studio v1
+plan predates this surface and read alone it implies Codexify owns the
+DAW-side session model. PR #1004 adds that pointer and a proof receipt
+that records the state of all five follow-through items.
 
 ## The one design decision worth arguing about
 
@@ -189,6 +296,12 @@ by `project_id`.
   the upsert is given merge semantics.
 - 24 new tests pass, and the supported-profile, command-bus, config and
   architecture suites still pass.
+- With PR #1003 applied, 28 tests pass in the route suite (24 original
+  plus 5 new, minus the one mock-based test they replaced) and the
+  media-route suites still pass -- 64 tests across `test_music_projects.py`,
+  `test_media_routes.py`, `test_media_upload.py` and `test_media_identity.py`.
+  The live chain against a live Postgres and a live Agent-DAW service
+  registers **7 of 7** artifacts, 0 failing checks.
 
 **Not verified:**
 
@@ -197,6 +310,9 @@ by `project_id`.
 - `MediaAsset` registration was verified end to end with the host's
   `media_identity` service and its own model, but the row has not been
   read back through the media library UI.
+- REAPER's unattended render is blocked on licensing, so "the project
+  opens in REAPER" is proven and "REAPER renders it unattended" is not.
+  The Codexify integration does not depend on either.
 
 ## The latency constraint that shapes the host integration
 

@@ -2,7 +2,7 @@
   "schema_version": "1.0",
   "id": "agentdaw",
   "name": "Agent-DAW",
-  "version": "0.1.0",
+  "version": "0.1.6",
   "description": "An LLM studio producer. Describe a vision in words; get stems, MIDI, a mix, a REAPER project and the measurements that were taken of them.",
   "base_url": "http://agentdaw:8000",
   "capabilities": [

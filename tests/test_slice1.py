@@ -1702,6 +1702,70 @@ def test_the_plugin_manifest_agrees_with_the_service():
     assert "/" not in base_url[len("http://"):].strip("/")
 
 
+def test_the_mirror_manifest_is_the_same_file_as_the_packaged_one():
+    """The manifest exists twice, and only one copy is checked by anything.
+
+    One copy lives inside the package, where the test above reads it and
+    where it has to be for the service to be installable. The other is
+    the staged mirror of what goes into Codexify. They have to be the
+    same file, because a manifest that advertises one action set to the
+    host and another to the service is exactly the split the test above
+    exists to prevent -- and the mirror copy is the one that becomes
+    Codexify's `plugins/agentdaw/manifest.json`.
+    """
+    packaged = (
+        Path(__file__).resolve().parents[1]
+        / "agentdaw"
+        / "codexify"
+        / "plugins"
+        / "agentdaw"
+        / "manifest.json"
+    )
+    mirror = (
+        Path(__file__).resolve().parents[1]
+        / "codexify"
+        / "plugins"
+        / "agentdaw"
+        / "manifest.json"
+    )
+
+    assert mirror.read_bytes() == packaged.read_bytes(), (
+        "the staged Codexify manifest has drifted from the packaged one"
+    )
+
+
+def test_every_version_string_agrees():
+    """One version, written in several places, that has to be the same in all.
+
+    The package version, the service version the plugin facade reads, and
+    the version in the manifest are the same artifact described several
+    ways. When they drift, the host is told the plugin is one version
+    while the service reports another, and nothing on the outside says
+    which is the real one.
+    """
+    import tomllib
+
+    from agentdaw import __version__
+    from agentdaw.serve import SERVICE_VERSION
+
+    root = Path(__file__).resolve().parents[1]
+    packaged = (
+        root / "agentdaw" / "codexify" / "plugins" / "agentdaw" / "manifest.json"
+    )
+    mirror = root / "codexify" / "plugins" / "agentdaw" / "manifest.json"
+
+    pyproject = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+
+    assert __version__ == SERVICE_VERSION, (
+        "the service reports a different version from the package"
+    )
+    assert pyproject["project"]["version"] == __version__, (
+        "the packaging metadata carries a different version"
+    )
+    assert json.loads(packaged.read_text(encoding="utf-8"))["version"] == __version__
+    assert json.loads(mirror.read_text(encoding="utf-8"))["version"] == __version__
+
+
 def test_the_service_rejects_an_action_it_does_not_implement(tmp_path, monkeypatch):
     """The advertised set is closed: an unknown action is refused, not guessed."""
     client = _plugin_client(tmp_path, monkeypatch)

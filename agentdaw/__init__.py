@@ -6,7 +6,7 @@ detail of how a vision becomes stems, MIDI and a REAPER project.
 
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.1.6"
 
 from .engine import SessionRender, TrackRender, render_preview, render_session
 from .llm import LLMClient, LLMConfig, load_llm_config

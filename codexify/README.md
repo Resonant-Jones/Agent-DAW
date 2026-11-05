@@ -28,9 +28,9 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 
 | Path | What it is |
 |---|---|
-| `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files |
-| `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, not yet merged |
-| `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, not yet merged |
+| `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files. Applies onto `74fd8f48` |
+| `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, not yet merged. Applies onto `68c9e523` |
+| `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, not yet merged. Applies onto `68c9e523` |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -42,31 +42,60 @@ The compose service and the `guardian_api.py` mount are in the patch.
 
 ## How to apply it
 
-From the root of a Codexify checkout:
+**Each patch applies onto one specific base commit.** The base matters,
+and it is not "whatever checkout you have" -- these are snapshots of PR
+diffs, so the tree they were cut against is part of the artifact:
+
+| Patch | Base | Why that base |
+|---|---|---|
+| `music-projects.patch` | `74fd8f48` | the commit before `69ef035a`, which is what PR #988 was cut from |
+| `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
+| `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
+
+Those bases were checked with `git apply --check` against clean
+checkouts of each commit, not assumed. `music-projects.patch` applies
+onto `74fd8f48` and onto nothing else; the other two apply onto
+`68c9e523` and onto `40c96c8f` (its parent, where the same files are
+unchanged).
+
+To apply the whole thing onto the state before any of the music work
+landed:
 
 ```bash
+git checkout 74fd8f48
 git apply --check codexify/music-projects.patch   # dry run
 git apply codexify/music-projects.patch
-cp codexify/guardian/routes/music_projects.py guardian/routes/
-cp codexify/guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py \
-   guardian/db/migrations/versions/
-cp codexify/config/supported_profiles/v1-music-producer.yaml config/supported_profiles/
-mkdir -p plugins/agentdaw
-cp codexify/plugins/agentdaw/manifest.json plugins/agentdaw/
-mkdir -p guardian/skills/music-producer
-cp codexify/guardian/skills/music-producer/SKILL.md guardian/skills/music-producer/
-cp codexify/tests/routes/test_music_projects.py tests/routes/
 ```
 
-If you want the artifact-registration fix and the ADR-108 pointer as
-well:
+The patch creates the new files itself -- the route, the migration, the
+supported profile, the plugin manifest, the skill and the tests -- so
+there is nothing to copy afterwards.
+
+The artifact-registration fix and the ADR-108 pointer are separate PRs,
+cut from a later base, so they go on top of `68c9e523` rather than on
+top of `music-projects.patch`:
 
 ```bash
+git checkout 68c9e523
 git apply codexify/music-registration-fix.patch
 git apply codexify/adr-108-authority-pointer.patch
 ```
 
-Both are separate PRs, so they apply independently of each other.
+They apply independently of each other.
+
+**On today's Codexify `main` these patches are history.** #988, #997
+and #1004 are merged, so `music-projects.patch` will refuse to apply
+(`already exists in working directory`, and the edits to
+`docker-compose.yml`, `guardian/core/pgdb.py` and
+`guardian/guardian_api.py` are already there). To read what landed,
+use the history rather than the patch:
+
+```bash
+git log --oneline --grep=music
+```
+
+Once PR #1003 merges, `music-registration-fix.patch` will fail the same
+way, because its change is in the tree.
 
 Then start the engine:
 
@@ -103,6 +132,27 @@ Every *other* profile leaves `music_projects` quarantined -- the same
 invariant the Hosted Room route families hold -- so the Producer is
 absent rather than broken wherever it was not asked for. There is a test
 for that too.
+
+## What the version numbers mean
+
+There is one version, and it is written in several places so that it can
+be checked: the packaging metadata (`pyproject.toml`), the package
+itself (`agentdaw.__version__`), the service (`SERVICE_VERSION`, which
+is what `GET /health` reports), and the plugin manifest -- in both the
+packaged copy and the staged mirror. A test asserts that all of them
+agree, because a host told the plugin is one version while the service
+reports another has no way to tell which is the real one.
+
+The git tags track it: `v0.1.0` through `v0.1.6`.
+
+Two things in Codexify move with it and have to be moved together:
+
+- the compose service's build context, `.../Agent-DAW.git#v0.1.6`
+- `plugins/agentdaw/manifest.json`
+
+The compose pin is not a formality. The route's async path depends on
+the engine carrying the job's context, and that only arrived in
+v0.1.3 -- see the section below.
 
 ## Where the outputs go
 
@@ -154,6 +204,51 @@ normalized_slug  : pad
 system_name      : 20261030-7d126d8f--pad.wav
 storage_prefix   : audio/
 ```
+
+## The engine version is part of the contract
+
+A compose is a job, and the job outlives the request that started it.
+When the host polls for the result it has to remember what it asked
+for -- which project, which thread -- so it can attribute the files it
+gets back. The host sends that context with the request, and the engine
+carries it on the job. The route then reads it back:
+
+```python
+# guardian/routes/music_projects.py
+raw_project_id = (result.get("context") or {}).get("project_id")
+if not raw_project_id:
+    logger.warning("[music_projects] files were produced without a "
+                   "project; they will not be registered")
+    return
+```
+
+That echo is the engine's, and it is why the tag in the compose service
+matters:
+
+| Engine | The job echoes its context |
+|---|---|
+| v0.1.2 | no |
+| v0.1.3 and later | yes |
+
+With a v0.1.2 engine the files are produced, the registration is
+skipped, and the route still reports success -- the same silent failure
+PR #1003 fixes, one layer up. This was measured on the images built
+from the tags themselves, the way compose builds them:
+
+```
+$ docker build https://github.com/Resonant-Jones/Agent-DAW.git#v0.1.2
+$ curl -s -X POST localhost:8002/invoke -d '{...,"context":{"project_id":"999"}}'
+$ curl -s localhost:8002/jobs/$JOB
+  {"status": "failed", "context": null, ...}
+```
+
+The check needs no model call and no render -- a failed job still
+carries the context, so a missing one is unambiguous.
+
+**The host should not be depending on this.** It sent the context, so
+it could keep its own copy keyed by job id. That removes the coupling
+between the host's correctness and the engine's age. It is not done
+yet.
 
 ## The one bug the review could not see
 
@@ -302,6 +397,10 @@ by `project_id`.
   `test_media_routes.py`, `test_media_upload.py` and `test_media_identity.py`.
   The live chain against a live Postgres and a live Agent-DAW service
   registers **7 of 7** artifacts, 0 failing checks.
+- The engine's context echo was measured on images **built from the git
+  tags the way compose builds them** -- `v0.1.2` answers `"context": null`,
+  `v0.1.5` answers with the context it was given. No model call and no
+  render are needed to see it.
 
 **Not verified:**
 

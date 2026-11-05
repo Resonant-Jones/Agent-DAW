@@ -81,7 +81,7 @@ ACTIONS = (
 
 PROTOCOL_VERSION = "1.0"
 SERVICE_NAME = "Agent-DAW"
-SERVICE_VERSION = "0.1.0"
+SERVICE_VERSION = "0.1.6"
 
 #: Where rendered artifacts go.
 #:

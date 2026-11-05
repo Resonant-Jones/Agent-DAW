@@ -413,6 +413,69 @@ already exists -- `AgentDeployment` / `AgentRun` / `AgentRunStep`
 the delegation drafts at `/api/delegations`
 (`guardian/routes/delegations.py:30`).
 
+### 5.1 The engine version is part of the host's contract
+
+The async shape carries one requirement that is easy to miss, because
+nothing fails loudly when it is missing.
+
+A compose is a job, and the job outlives the request that started it.
+When the host polls for the result, it has to remember what it asked
+for -- which project, which thread -- so it can attribute the files it
+gets back. The host sends that context with the request, and the
+engine carries it on the job:
+
+```python
+# guardian/routes/music_projects.py -- when the job starts
+context = _music_context(req.project_id, req.thread_id, request_user_scope)
+output = _invoke("compose", payload, context=context, timeout=timeout)
+
+# guardian/routes/music_projects.py -- when it is polled
+raw_project_id = (result.get("context") or {}).get("project_id")
+if not raw_project_id:
+    logger.warning("[music_projects] files were produced without a "
+                   "project; they will not be registered")
+    return
+```
+
+`result.get("context")` is the engine's echo of what it was given. If
+the engine does not echo it, `raw_project_id` is `None`, the
+registration is skipped, and the route still reports success. The files
+exist and nothing is registered -- the same silent failure PR #1003 was
+opened to fix, one layer up.
+
+Carrying the context on the job landed in Agent-DAW **v0.1.3**
+(`6d29327`):
+
+| Engine | The job echoes its context |
+|---|---|
+| v0.1.2 | no |
+| v0.1.3 and later | yes |
+
+This is checkable without a model call and without a render. Invoke any
+action in async mode, then read the job back:
+
+```bash
+curl -s -X POST http://127.0.0.1:8000/invoke -H 'Content-Type: application/json' \
+  -d '{"protocol_version":"1.0","plugin_id":"agentdaw","capability":"music",
+       "action":"measure","input":{"mode":"async","path":"/nonexistent/probe.wav"},
+       "context":{"project_id":"999","thread_id":"888"}}'
+```
+
+A v0.1.2 engine answers `"context": null`. A v0.1.3+ engine answers
+with the context it was given. The action does not have to succeed for
+this to be visible -- the context is on the job either way, and a
+failed job is still a job.
+
+**The host should not be depending on this at all.** It sent the
+context, so it could keep its own copy keyed by job id and never need
+the engine to remember anything. That removes the version coupling
+entirely. It is not done yet, and it is the better shape: a host that
+can lose the attribution of a job it started, because the engine it
+asked happened to be old enough, is a host that will lose it again.
+
+Until that is done, the engine version is part of the host's contract,
+and the pin in `docker-compose.yml` is not a formality.
+
 ---
 
 ## 6. What the timings actually are
@@ -494,6 +557,9 @@ system.
 - [ ] Mount the output root into the backend at the same path the service
       writes it, or the registration cannot read the files
 - [ ] Mirror approved anchors into `VectorStore` under `project:{id}`
+- [ ] Pin the engine to **v0.1.3 or later** in the compose service.
+      v0.1.2 does not echo the job's context, so the async path produces
+      the files and registers none of them -- see section 5.1
 
 **In Codexify, for path B (service plugin):**
 

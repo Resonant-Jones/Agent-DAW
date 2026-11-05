@@ -6,6 +6,11 @@ it can be reviewed before it touches Codexify's repository.
 It is **not** part of the `agentdaw` package. Nothing in `agentdaw/`
 imports anything here.
 
+The patches below are snapshots of PR diffs, so they come in two
+states: some of them have been merged into Codexify and are kept here as
+a record of what landed, and some are open proposals. The table in
+"What is here" says which is which.
+
 ## The shape
 
 **The engine runs in its own service; the route does not.**
@@ -56,8 +61,8 @@ diffs, so the tree they were cut against is part of the artifact:
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
-onto `74fd8f48` and onto nothing else; the other two apply onto
-`68c9e523` and onto `40c96c8f` (its parent, where the same files are
+onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
+apply onto `40c96c8f` (its parent, where the same files are
 unchanged); `music-engine-pin.patch` applies onto `c28bc8f4`.
 
 To apply the whole thing onto the state before any of the music work
@@ -85,8 +90,8 @@ git apply codexify/adr-108-authority-pointer.patch
 
 They apply independently of each other.
 
-The engine pin is the third, and it is the one that makes the whole
-thing work end to end:
+The engine pin is the last of them, and it is the one that makes the
+whole thing work end to end:
 
 ```bash
 git checkout c28bc8f4

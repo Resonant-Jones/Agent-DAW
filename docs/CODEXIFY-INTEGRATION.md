@@ -327,6 +327,23 @@ Three things follow, and all three were got wrong before they were run:
 The work has to belong to something: a compose that names no project is
 refused, because a session with nowhere to live is not a session.
 
+### 4.2 The host owns the identity, and that includes the hash
+
+The Producer reports a `content_hash` for each file it produced. **The
+host should hash the bytes itself anyway, and treat the Producer's hash
+as a claim.**
+
+The host already reads the file to check it exists, so hashing it is
+free. And the hash *is* the identity: `media_assets` has a unique index
+on `(project_id, media_kind, provenance, content_hash)`. If the row's
+identity is the Producer's claim rather than the bytes, then a wrong
+claim becomes a permanent part of the registry's identity, and the same
+file registered twice can become two rows.
+
+This is not hypothetical. It was one of three defects found by running
+the whole chain against a live database instead of a mock -- see
+[§9.1](#91-what-the-live-run-found-that-the-tests-could-not).
+
 ---
 
 ## 5. How a turn actually flows
@@ -534,3 +551,60 @@ system.
   REAPER-driven render cannot be unattended on an unlicensed install.
   This does not affect the Codexify integration: Agent-DAW renders the
   stems itself, and REAPER is where the Artist takes over.
+
+### 9.1 What the live run found that the tests could not
+
+The Music Producer surface merged with 24 passing tests and an OpenAPI
+schema that described it correctly. Then the whole chain was run against
+a live Postgres and a live Agent-DAW service, and:
+
+```
+[FAIL] MediaAsset rows were created -- 1
+[FAIL] every artifact was registered -- 1 of 7
+```
+
+**One** of the seven files a render produces was registered, and the
+route reported success. Three defects, all silent:
+
+1. **`asset.id` was read after the session that committed the row had
+   closed.** Committing expires the instance's attributes, and a closed
+   session cannot refresh them, so the read raised
+   `DetachedInstanceError` -- on the first artifact, every time. The
+   exception was swallowed by the route's log-and-continue, so the
+   caller saw no failure and the Artist saw six missing files.
+2. **The loop had no per-artifact isolation.** One failing artifact
+   aborted every artifact after it.
+3. **Registration was not idempotent, and the identity was not the
+   host's.** A finished job can be polled more than once -- every poll
+   of a succeeded job asks for the files again -- and the second
+   registration collided with the unique index
+   `uq_media_assets_active_identity`, taking the rest of the session
+   with it. See [§4.2](#42-the-host-owns-the-identity-and-that-includes-the-hash)
+   for the hash half of this.
+
+**Why the test that was guarding it did not fire.** It used a fake
+session:
+
+```python
+class _Session:
+    def add(self, _asset): calls.append("add")
+    def flush(self): calls.append("flush")
+    def commit(self): calls.append("commit")
+```
+
+A fake session has no attribute expiry, no commit semantics and no
+unique constraint. It asserted that `commit` was *called* -- and
+`commit` was called. The bug was three lines later.
+
+**The rule this generalises to:** a fake session can only prove that a
+call was made. It cannot prove that the call had an effect. Anything
+whose correctness is a property of the *database* -- did the row
+survive, did it collide, is it still there after the session closed --
+has to be proven against a real database. ADR-108 requires exactly this
+for the artifact-custody assertion.
+
+The fix is in Codexify PR #1003; the replacement tests use a disposable
+PostgreSQL, and reverting only the route to `main` fails all five.
+
+With the fix, the same live chain reports **7 of 7 registered, 0 failing
+checks**.

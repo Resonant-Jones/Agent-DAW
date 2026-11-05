@@ -31,6 +31,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files. Applies onto `74fd8f48` |
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, not yet merged. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, not yet merged. Applies onto `68c9e523` |
+| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, not yet merged. Applies onto `c28bc8f4` |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -51,12 +52,13 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-projects.patch` | `74fd8f48` | the commit before `69ef035a`, which is what PR #988 was cut from |
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
+| `music-engine-pin.patch` | `c28bc8f4` | the commit PR #1005 was cut from |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the other two apply onto
 `68c9e523` and onto `40c96c8f` (its parent, where the same files are
-unchanged).
+unchanged); `music-engine-pin.patch` applies onto `c28bc8f4`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -83,6 +85,14 @@ git apply codexify/adr-108-authority-pointer.patch
 
 They apply independently of each other.
 
+The engine pin is the third, and it is the one that makes the whole
+thing work end to end:
+
+```bash
+git checkout c28bc8f4
+git apply codexify/music-engine-pin.patch
+```
+
 **On today's Codexify `main` these patches are history.** #988, #997
 and #1004 are merged, so `music-projects.patch` will refuse to apply
 (`already exists in working directory`, and the edits to
@@ -95,7 +105,8 @@ git log --oneline --grep=music
 ```
 
 Once PR #1003 merges, `music-registration-fix.patch` will fail the same
-way, because its change is in the tree.
+way, because its change is in the tree. Once PR #1005 merges,
+`music-engine-pin.patch` will fail the same way.
 
 Then start the engine:
 
@@ -145,14 +156,22 @@ reports another has no way to tell which is the real one.
 
 The git tags track it: `v0.1.0` through `v0.1.6`.
 
+The rule for when a change gets a release: a change that alters what
+the service *does* gets a tag and moves the version. A change that only
+stages or documents gets neither, and `main` runs ahead of the last
+tag. So the version names the release the code corresponds to, not the
+commit it happens to sit on.
+
 Two things in Codexify move with it and have to be moved together:
 
 - the compose service's build context, `.../Agent-DAW.git#v0.1.6`
 - `plugins/agentdaw/manifest.json`
 
-The compose pin is not a formality. The route's async path depends on
-the engine carrying the job's context, and that only arrived in
-v0.1.3 -- see the section below.
+The compose pin is not a formality. It names the release that was
+qualified against the live route, and the route's async path depends on
+the engine carrying the job's context, which only arrived in v0.1.3 --
+see the section below. A newer release is not pinned until it has been
+qualified.
 
 ## Where the outputs go
 

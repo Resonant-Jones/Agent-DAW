@@ -1,0 +1,45 @@
+# The Codexify-side engine pin, as proposed.
+#
+# PR #1005 (fix(music): pin the engine to a tag that can carry the job's
+# context), opened 2026-11-05.
+#
+# Apply onto c28bc8f4, or onto any later commit that has not changed
+# docker-compose.yml or plugins/agentdaw/manifest.json.
+#
+# The compose service pinned the Agent-DAW engine at v0.1.2, which predates
+# the job context echo (v0.1.3). The route's async path reads the project
+# id back out of `result.get("context")`; with a v0.1.2 engine that is
+# empty, the registration is skipped with a warning, and the route still
+# reports success. The files are produced and none of them are registered.
+#
+diff --git a/docker-compose.yml b/docker-compose.yml
+index c05ff88a..2d0f03b9 100644
+--- a/docker-compose.yml
++++ b/docker-compose.yml
+@@ -1050,8 +1050,16 @@ services:
+       - music
+     # Built from the Agent-DAW repository at a tagged release. Point
+     # CODEXIFY_AGENTDAW_BUILD_CONTEXT at a local checkout for development.
++    #
++    # The tag is part of the contract, not a formality. The route's async
++    # path reads the project id back out of the job's echoed context, and
++    # the engine only started carrying that context in v0.1.3. On v0.1.2
++    # the files are produced, the registration is skipped with a warning,
++    # and the route still reports success -- so nothing is registered.
++    # Verified against images built from the tags themselves: v0.1.2
++    # answers `"context": null`, v0.1.5 answers with the context.
+     build:
+-      context: "${CODEXIFY_AGENTDAW_BUILD_CONTEXT:-https://github.com/Resonant-Jones/Agent-DAW.git#v0.1.2}"
++      context: "${CODEXIFY_AGENTDAW_BUILD_CONTEXT:-https://github.com/Resonant-Jones/Agent-DAW.git#v0.1.6}"
+       dockerfile: Dockerfile
+     working_dir: /app
+     environment:
+diff --git a/plugins/agentdaw/manifest.json b/plugins/agentdaw/manifest.json
+index 3344d12d..5962f843 100644
+--- a/plugins/agentdaw/manifest.json
++++ b/plugins/agentdaw/manifest.json
+@@ -1,3 +1,3 @@
+ version https://git-lfs.github.com/spec/v1
+-oid sha256:c3838e1eed44cb5eb5ab653ca667195769168ba3c8be7e1e00f46fe0cb3c2ec3
++oid sha256:6719b53069df0b9ecad1473291a2c02f57a616ba127ffdbf4f9e643a13925183
+ size 623

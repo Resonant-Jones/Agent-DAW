@@ -1335,6 +1335,27 @@ def test_service_plugin_reports_a_failure_without_crashing(tmp_path, monkeypatch
     assert body["output"] is None
 
 
+def _await_job(client, job_id, timeout=180.0):
+    """Poll a job until it stops running, or the deadline passes.
+
+    The deadline is generous on purpose. These tests are about the job
+    *finishing* -- that the handle works, that the result comes back,
+    that the context survived -- and not about how fast it finished. A
+    fixed short poll budget turns a loaded machine into a false failure:
+    the render is a couple of seconds on an idle box and the better part
+    of a minute on a busy one, and the difference says nothing about the
+    behaviour under test.
+    """
+    deadline = time.time() + timeout
+    snapshot = {}
+    while time.time() < deadline:
+        snapshot = client.get(f"/jobs/{job_id}").json()
+        if snapshot["status"] != "running":
+            return snapshot
+        time.sleep(0.05)
+    return snapshot
+
+
 def test_service_plugin_async_compose_returns_a_job_that_finishes(
     tmp_path, monkeypatch
 ):
@@ -1354,12 +1375,7 @@ def test_service_plugin_async_compose_returns_a_job_that_finishes(
     job_id = body["output"]["job_id"]
     assert body["output"]["status"] == "running"
 
-    snapshot = {}
-    for _ in range(200):
-        snapshot = client.get(f"/jobs/{job_id}").json()
-        if snapshot["status"] != "running":
-            break
-        time.sleep(0.05)
+    snapshot = _await_job(client, job_id)
 
     assert snapshot["status"] == "succeeded", snapshot
     assert snapshot["output"]["spec"]["title"]
@@ -1382,12 +1398,7 @@ def test_a_job_remembers_the_context_it_was_started_with(tmp_path, monkeypatch):
     assert body["ok"] is True
     job_id = body["output"]["job_id"]
 
-    snapshot = {}
-    for _ in range(200):
-        snapshot = client.get(f"/jobs/{job_id}").json()
-        if snapshot["status"] != "running":
-            break
-        time.sleep(0.05)
+    snapshot = _await_job(client, job_id)
 
     assert snapshot["status"] == "succeeded", snapshot
     assert snapshot["context"]["project_id"] == "17"

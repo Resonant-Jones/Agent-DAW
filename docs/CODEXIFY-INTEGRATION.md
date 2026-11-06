@@ -630,6 +630,23 @@ system.
   worth knowing about before changing the compose file: expect the
   frontend job to run, and expect it to be red for reasons that have
   nothing to do with the change.
+- **Touching the qualified surface invalidates the qualification
+  registry.** `docker-compose.yml`, `config/**`, `guardian/**`,
+  `frontend/**`, `plugins/**`, `codex_runner/**` and the root package
+  files are all in the `supported-compose-stock` rubric's
+  `surface_paths`
+  (`docs/qualification/rubrics/supported-compose-stock.md:22-34`).
+  Change any of them and `docs/qualification/registry.json` has to be
+  regenerated **in the same change**, or it states something untrue and
+  the Qualification Contracts check -- which runs
+  `scripts/qualification/generate_registry.py --check` -- fails the
+  next change that touches `docs/qualification/**`, for a reason that
+  has nothing to do with it. Two traps: the generator needs the
+  **full** repository history, because a shallow clone resolves the
+  qualification run's tested commit as outside the tip's lineage and
+  emits a different, false registry; and `registry.json` carries
+  `-diff` in `.gitattributes`, so `git diff` renders it as binary and
+  a patch that includes it needs `git diff --text`.
 
 ### 9.1 What the live run found that the tests could not
 

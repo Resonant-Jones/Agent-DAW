@@ -1,10 +1,14 @@
 # The Codexify-side engine pin, as proposed.
 #
 # PR #1005 (fix(music): pin the engine to a tag that can carry the job's
-# context), opened 2026-11-05.
+# context), opened 2026-11-05. The branch also carries Resonant's own
+# "docs(music): keep ADR-108 anchored to Compose engine pin", the merge of
+# the then-current main, and the qualification-registry regeneration that
+# the compose change requires.
 #
-# Apply onto c28bc8f4, or onto any later commit that has not changed
-# docker-compose.yml or plugins/agentdaw/manifest.json.
+# Apply onto 96e9444e6, or onto any later commit that has not changed
+# docker-compose.yml, plugins/agentdaw/manifest.json,
+# docs/architecture/adr/108-... or docs/qualification/registry.json.
 #
 # The compose service pinned the Agent-DAW engine at v0.1.2, which predates
 # the job context echo (v0.1.3). The route's async path reads the project
@@ -12,8 +16,16 @@
 # empty, the registration is skipped with a warning, and the route still
 # reports success. The files are produced and none of them are registered.
 #
+# docs/qualification/registry.json is in this patch because
+# docker-compose.yml and plugins/agentdaw/manifest.json are both in the
+# `supported-compose-stock` rubric's surface_paths. The registry has to be
+# regenerated in the same change or it states something untrue. Generate it
+# with full repository history: a shallow clone resolves the qualification
+# run's tested commit as outside the tip's lineage and emits a different,
+# false registry.
+#
 diff --git a/docker-compose.yml b/docker-compose.yml
-index c05ff88a..2d0f03b9 100644
+index c05ff88ad..2d0f03b90 100644
 --- a/docker-compose.yml
 +++ b/docker-compose.yml
 @@ -1050,8 +1050,16 @@ services:
@@ -34,8 +46,57 @@ index c05ff88a..2d0f03b9 100644
        dockerfile: Dockerfile
      working_dir: /app
      environment:
+diff --git a/docs/architecture/adr/108-codexify-music-producer-authority-and-agentdaw-service-boundary.md b/docs/architecture/adr/108-codexify-music-producer-authority-and-agentdaw-service-boundary.md
+index 6fea6351e..769f30b1e 100644
+--- a/docs/architecture/adr/108-codexify-music-producer-authority-and-agentdaw-service-boundary.md
++++ b/docs/architecture/adr/108-codexify-music-producer-authority-and-agentdaw-service-boundary.md
+@@ -59,8 +59,11 @@ All paths are relative to `main` unless a revision is stated.
+ 
+ External:
+ 
+-- `Resonant-Jones/Agent-DAW` — the producer engine, referenced at tag `v0.1.2`
+-  by `docker-compose.yml` via `CODEXIFY_AGENTDAW_BUILD_CONTEXT`
++- `Resonant-Jones/Agent-DAW` — the producer engine. The authoritative
++  default build tag is the `CODEXIFY_AGENTDAW_BUILD_CONTEXT` fallback in
++  `docker-compose.yml`, not this ADR. PR #1005 moved that default to `v0.1.6`
++  on 2026-11-05 so async jobs retain the project context needed for artifact
++  registration. This dated provenance note is not a separate version pin.
+ - `spec/Brief.schema.json`, `spec/SessionSpec.schema.json`,
+   `spec/PatchSpec.schema.json`, `spec/Macros.schema.json` — the published
+   specification contract
+@@ -87,8 +90,9 @@ parties with four different kinds of authority:
+    MIDI, rendered stems, and a mix.
+ 
+ The engine is a separate repository and a separate container. `docker-compose.yml`
+-builds `agentdaw` from `https://github.com/Resonant-Jones/Agent-DAW.git#v0.1.2`
+-behind the optional `music` Compose profile, bind-mounting its output root so
++builds `agentdaw` from the tagged Agent-DAW release declared by the
++`CODEXIFY_AGENTDAW_BUILD_CONTEXT` default (or an explicitly configured override),
++behind the optional `music` Compose profile. Its output root is bind-mounted so
+ the host DAW can open what the service produced. Codexify never imports
+ Agent-DAW; the dependency runs in the other direction, over HTTP, on the
+ canonical service-plugin protocol (`POST {base_url}/invoke` with a versioned
+diff --git a/docs/qualification/registry.json b/docs/qualification/registry.json
+index 35807a7c1..07a27844e 100644
+--- a/docs/qualification/registry.json
++++ b/docs/qualification/registry.json
+@@ -46,12 +46,13 @@
+     },
+     "supported-compose-stock": {
+       "blockers": [
++        "The tested commit no longer describes the current tip: 2 path(s) in this qualification surface changed since the run.",
+         "1 earlier run receipt(s) for this surface were superseded by a later run."
+       ],
+       "evidence": [
+         "docs/architecture/proofs/supported-compose/2026-11-05-supported-compose-stock-844b35599ed6.md"
+       ],
+-      "freshness": "current",
++      "freshness": "stale",
+       "last_qualified_at": "2026-11-05",
+       "latest_run": "runs/2026-11-05-supported-compose-stock-844b35599ed6.md",
+       "metrics": {
 diff --git a/plugins/agentdaw/manifest.json b/plugins/agentdaw/manifest.json
-index 3344d12d..5962f843 100644
+index 3344d12d1..5962f8434 100644
 --- a/plugins/agentdaw/manifest.json
 +++ b/plugins/agentdaw/manifest.json
 @@ -1,3 +1,3 @@

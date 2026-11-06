@@ -34,9 +34,9 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | Path | What it is |
 |---|---|
 | `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files. Applies onto `74fd8f48` |
-| `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, not yet merged. Applies onto `68c9e523` |
-| `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, not yet merged. Applies onto `68c9e523` |
-| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, not yet merged. Applies onto `c28bc8f4` |
+| `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
+| `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
+| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, still open. Applies onto `96e9444e6` |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -57,13 +57,13 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-projects.patch` | `74fd8f48` | the commit before `69ef035a`, which is what PR #988 was cut from |
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
-| `music-engine-pin.patch` | `c28bc8f4` | the commit PR #1005 was cut from |
+| `music-engine-pin.patch` | `96e9444e6` | the commit PR #1005 was cut from |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
 apply onto `40c96c8f` (its parent, where the same files are
-unchanged); `music-engine-pin.patch` applies onto `c28bc8f4`.
+unchanged); `music-engine-pin.patch` applies onto `96e9444e6`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -94,13 +94,22 @@ The engine pin is the last of them, and it is the one that makes the
 whole thing work end to end:
 
 ```bash
-git checkout c28bc8f4
+git checkout 96e9444e6
 git apply codexify/music-engine-pin.patch
 ```
 
-**On today's Codexify `main` these patches are history.** #988, #997
-and #1004 are merged, so `music-projects.patch` will refuse to apply
-(`already exists in working directory`, and the edits to
+**That patch also carries `docs/qualification/registry.json`,** and it
+has to. `docker-compose.yml` and `plugins/agentdaw/manifest.json` are
+both in the `supported-compose-stock` rubric's `surface_paths`, so
+moving the pin changes the qualified surface, and the registry has to
+be regenerated in the same change or it states something that is no
+longer true. Regenerate it with **full repository history**: a shallow
+clone resolves the qualification run's tested commit as outside the
+tip's lineage and emits a different, false registry.
+
+**On today's Codexify `main` these patches are history.** #988, #997,
+#1003 and #1004 are merged, so `music-projects.patch` will refuse to
+apply (`already exists in working directory`, and the edits to
 `docker-compose.yml`, `guardian/core/pgdb.py` and
 `guardian/guardian_api.py` are already there). To read what landed,
 use the history rather than the patch:
@@ -109,9 +118,9 @@ use the history rather than the patch:
 git log --oneline --grep=music
 ```
 
-Once PR #1003 merges, `music-registration-fix.patch` will fail the same
-way, because its change is in the tree. Once PR #1005 merges,
-`music-engine-pin.patch` will fail the same way.
+`music-registration-fix.patch` and `adr-108-authority-pointer.patch`
+will fail the same way now that their changes are in the tree. Once PR
+#1005 merges, `music-engine-pin.patch` will fail the same way.
 
 Then start the engine:
 

@@ -6,7 +6,7 @@
 # the then-current main, and the qualification-registry regeneration that
 # the compose change requires.
 #
-# Apply onto dbedca62f, or onto any later commit that has not changed
+# Apply onto fba6e4dac, or onto any later commit that has not changed
 # docker-compose.yml, plugins/agentdaw/manifest.json,
 # docs/architecture/adr/108-... or docs/qualification/registry.json.
 #

@@ -6,7 +6,7 @@
 # the then-current main, and the qualification-registry regeneration that
 # the compose change requires.
 #
-# Apply onto 96e9444e6, or onto any later commit that has not changed
+# Apply onto dbedca62f, or onto any later commit that has not changed
 # docker-compose.yml, plugins/agentdaw/manifest.json,
 # docs/architecture/adr/108-... or docs/qualification/registry.json.
 #
@@ -25,10 +25,10 @@
 # false registry.
 #
 diff --git a/docker-compose.yml b/docker-compose.yml
-index c05ff88ad..2d0f03b90 100644
+index 3679f48f9..68f278a11 100644
 --- a/docker-compose.yml
 +++ b/docker-compose.yml
-@@ -1050,8 +1050,16 @@ services:
+@@ -1080,8 +1080,16 @@ services:
        - music
      # Built from the Agent-DAW repository at a tagged release. Point
      # CODEXIFY_AGENTDAW_BUILD_CONTEXT at a local checkout for development.
@@ -77,24 +77,18 @@ index 6fea6351e..769f30b1e 100644
  Agent-DAW; the dependency runs in the other direction, over HTTP, on the
  canonical service-plugin protocol (`POST {base_url}/invoke` with a versioned
 diff --git a/docs/qualification/registry.json b/docs/qualification/registry.json
-index 35807a7c1..07a27844e 100644
+index 72824762c..e6d05d02c 100644
 --- a/docs/qualification/registry.json
 +++ b/docs/qualification/registry.json
-@@ -46,12 +46,13 @@
+@@ -71,7 +71,7 @@
      },
      "supported-compose-stock": {
        "blockers": [
-+        "The tested commit no longer describes the current tip: 2 path(s) in this qualification surface changed since the run.",
+-        "The tested commit no longer describes the current tip: 27 path(s) in this qualification surface changed since the run.",
++        "The tested commit no longer describes the current tip: 28 path(s) in this qualification surface changed since the run.",
          "1 earlier run receipt(s) for this surface were superseded by a later run."
        ],
        "evidence": [
-         "docs/architecture/proofs/supported-compose/2026-11-05-supported-compose-stock-844b35599ed6.md"
-       ],
--      "freshness": "current",
-+      "freshness": "stale",
-       "last_qualified_at": "2026-11-05",
-       "latest_run": "runs/2026-11-05-supported-compose-stock-844b35599ed6.md",
-       "metrics": {
 diff --git a/plugins/agentdaw/manifest.json b/plugins/agentdaw/manifest.json
 index 3344d12d1..5962f8434 100644
 --- a/plugins/agentdaw/manifest.json

@@ -36,7 +36,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files. Applies onto `74fd8f48` |
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
-| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, still open. Applies onto `96e9444e6` |
+| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, still open. Applies onto `dbedca62f` |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -57,13 +57,13 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-projects.patch` | `74fd8f48` | the commit before `69ef035a`, which is what PR #988 was cut from |
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
-| `music-engine-pin.patch` | `96e9444e6` | the commit PR #1005 was cut from |
+| `music-engine-pin.patch` | `dbedca62f` | the commit PR #1005 was cut from |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
 apply onto `40c96c8f` (its parent, where the same files are
-unchanged); `music-engine-pin.patch` applies onto `96e9444e6`.
+unchanged); `music-engine-pin.patch` applies onto `dbedca62f`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -94,7 +94,7 @@ The engine pin is the last of them, and it is the one that makes the
 whole thing work end to end:
 
 ```bash
-git checkout 96e9444e6
+git checkout dbedca62f
 git apply codexify/music-engine-pin.patch
 ```
 

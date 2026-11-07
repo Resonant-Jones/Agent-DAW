@@ -665,6 +665,30 @@ system.
   worth knowing about before changing the compose file: expect the
   frontend job to run, and expect it to be red for reasons that have
   nothing to do with the change.
+- **One of Codexify's backend tests fails about one run in sixteen, for a
+  reason that has nothing to do with the change under it.**
+  `tests/routes/test_people_search_discoverability.py::test_other_node_profile_is_out_of_scope`
+  asserts that a profile on another node is not discoverable, and it fails
+  when the "local node" it resolves to is the *other* one. The local node
+  is chosen by `ORDER BY created_at ASC, node_id ASC LIMIT 1`
+  (`guardian/messaging/service.py`, `get_or_create_local_node`). Both
+  nodes get `created_at` from SQLite's `CURRENT_TIMESTAMP`, which has
+  **second** precision, so rows created in the same second tie -- and the
+  tie-break is on the node id. The generated id is `"node-" + uuid4().hex`
+  and the test's other node is literally `"node-elsewhere"`, so the other
+  node wins the tie exactly when the random hex digit is `f`: one time in
+  sixteen.
+
+  Measured on 2026-11-07, the same test run forty times against a branch
+  with no changes to the messaging path and against a branch with the
+  music-attribution work on it: **2 failures and 3 failures**. The rate
+  is the same, so it is pre-existing and not caused by the music surface.
+
+  What to do about it: re-run the failed job. It will pass fifteen times
+  out of sixteen. Do not fold a fix into an unrelated pull request -- the
+  underlying defect is that the local-node resolution is ambiguous when
+  two nodes share a `created_at`, and that is a change to the messaging
+  service, not to whatever you were doing.
 - **Touching the qualified surface invalidates the qualification
   registry.** `docker-compose.yml`, `config/**`, `guardian/**`,
   `frontend/**`, `plugins/**`, `codex_runner/**` and the root package

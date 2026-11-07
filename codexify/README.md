@@ -37,7 +37,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
 | `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, merged 2026-11-07. Applies onto `fba6e4dac` |
-| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `eb4c8e20b`. Carries the proof harnesses too, so the receipt can be reproduced |
+| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, merged 2026-11-07 as `56acff64c`. Applies onto `eb4c8e20b`. Carries the proof harnesses too, so the receipt can be reproduced |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `guardian/db/migrations/versions/c4f7a9e2b810_add_music_jobs_table.py` | New: the Alembic migration for the host's own record of a music job's attribution |
@@ -60,7 +60,7 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
 | `music-engine-pin.patch` | `fba6e4dac` | the commit PR #1005 was cut from |
-| `music-job-attribution.patch` | `eb4c8e20b` | the commit PR #1027 merged after main moved under it a third time |
+| `music-job-attribution.patch` | `eb4c8e20b` | the `main` tip PR #1027 merged after main moved under it a third time; the PR landed as `56acff64c` |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
@@ -112,8 +112,8 @@ clone resolves the qualification run's tested commit as outside the
 tip's lineage and emits a different, false registry.
 
 **On today's Codexify `main` these patches are history.** #988, #997,
-#1003, #1004 and #1005 are merged, so `music-projects.patch` will refuse
-to apply (`already exists in working directory`, and the edits to
+#1003, #1004, #1005 and #1027 are merged, so `music-projects.patch` will
+refuse to apply (`already exists in working directory`, and the edits to
 `docker-compose.yml`, `guardian/core/pgdb.py` and
 `guardian/guardian_api.py` are already there). To read what landed,
 use the history rather than the patch:
@@ -122,12 +122,12 @@ use the history rather than the patch:
 git log --oneline --grep=music
 ```
 
-`music-registration-fix.patch`, `adr-108-authority-pointer.patch` and
-`music-engine-pin.patch` will fail the same way now that their changes
-are in the tree. `music-job-attribution.patch` is the only one still
-open, and it applies onto `eb4c8e20b` -- the `main` tip the branch
-merges, which carries PR #1014, PR #1017 and PR #1030. It also applies
-onto the `main` tips after it, which add only Task Spec documents.
+`music-registration-fix.patch`, `adr-108-authority-pointer.patch`,
+`music-engine-pin.patch` and `music-job-attribution.patch` will all fail the
+same way now that their changes are in the tree. The last one is the diff
+PR #1027 carried, merged as `56acff64c`; it applies onto `eb4c8e20b`, the
+`main` tip the branch merged, which carries PR #1014, PR #1017 and PR #1030.
+It also applies onto the `main` tips after it.
 
 **One hunk in `music-job-attribution.patch` is not the music change.**
 The weekly refresh `ad1fc651a` dropped two obligations that Codexify's
@@ -143,6 +143,9 @@ byte-identical sentences, so the branch's merge of `main` collapsed them
 into one with no conflict. PR #1027 touches `guardian/`, so the job does
 run and it surfaced the second assertion. The patch carries the repair
 in its own commit, so it can be read separately from the music change.
+Both copies are on `main` now -- PR #1030's as `f5d89dbbc5` and PR
+#1027's inside `56acff64c` -- and they restore the same two sentences,
+so `main` carries the rule once.
 
 **`music-job-attribution.patch` carries `docs/qualification/registry.json`
 as text.** `docs/qualification/*.json` is marked `-diff` in

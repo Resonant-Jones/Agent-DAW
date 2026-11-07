@@ -706,6 +706,21 @@ system.
   emits a different, false registry; and `registry.json` carries
   `-diff` in `.gitattributes`, so `git diff` renders it as binary and
   a patch that includes it needs `git diff --text`.
+- **A documentation-only change never runs Codexify's backend suite, and
+  the green badge is not a test result.** The `Detect Changed Areas` job
+  computes `run_backend` from the changed paths, and a change that touches
+  only documentation leaves it false -- so the `Backend Tests (Python
+  3.11)` job's pytest step is logged as `No-op (no backend-relevant
+  changes) -> skipped` and the job still reports **pass**. Measured on
+  PR #1030, a documentation-only pull request: that job passed in
+  **29 seconds** without running a single test. The same job on a
+  branch that touches `guardian/` runs the suite for 39 minutes. So a
+  green Backend Tests badge on a docs-only change proves nothing, and a
+  branch that touches code will surface `main`'s latent documentation
+  defects as its own CI failures. When a document contract fails, check
+  the job log for a `Run backend tests` step before reading the badge;
+  **Architecture Contracts is the job that actually catches release-truth
+  defects**, and it is not skipped by a documentation-only change.
 
 ### 9.1 What the live run found that the tests could not
 

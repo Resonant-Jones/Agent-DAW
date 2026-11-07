@@ -37,7 +37,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
 | `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, merged 2026-11-07. Applies onto `fba6e4dac` |
-| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `cbc5dee70`. Carries the proof harnesses too, so the receipt can be reproduced |
+| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `9e987661f`. Carries the proof harnesses too, so the receipt can be reproduced |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `guardian/db/migrations/versions/c4f7a9e2b810_add_music_jobs_table.py` | New: the Alembic migration for the host's own record of a music job's attribution |
@@ -60,14 +60,14 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
 | `music-engine-pin.patch` | `fba6e4dac` | the commit PR #1005 was cut from |
-| `music-job-attribution.patch` | `cbc5dee70` | the commit PR #1027 was cut from |
+| `music-job-attribution.patch` | `9e987661f` | the commit PR #1027 was rebased onto after main moved under it |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
 apply onto `40c96c8f` (its parent, where the same files are
 unchanged); `music-engine-pin.patch` applies onto `fba6e4dac`; and
-`music-job-attribution.patch` applies onto `cbc5dee70`.
+`music-job-attribution.patch` applies onto `9e987661f`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -125,7 +125,7 @@ git log --oneline --grep=music
 `music-registration-fix.patch`, `adr-108-authority-pointer.patch` and
 `music-engine-pin.patch` will fail the same way now that their changes
 are in the tree. `music-job-attribution.patch` is the only one still
-open, and it applies onto `cbc5dee70` -- the merge commit of #1005,
+open, and it applies onto `9e987661f` -- the commit that dropped the tip-dependent path counts from the release truth,
 which is `main` today.
 
 **`music-job-attribution.patch` carries `docs/qualification/registry.json`

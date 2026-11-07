@@ -36,7 +36,8 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-projects.patch` | The unified diff of both merged PRs, against existing Codexify files. Applies onto `74fd8f48` |
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
-| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, still open. Applies onto `fba6e4dac` |
+| `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, merged 2026-11-07. Applies onto `fba6e4dac` |
+| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `cbc5dee70` |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
@@ -58,12 +59,14 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
 | `music-engine-pin.patch` | `fba6e4dac` | the commit PR #1005 was cut from |
+| `music-job-attribution.patch` | `cbc5dee70` | the commit PR #1027 was cut from |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
 apply onto `40c96c8f` (its parent, where the same files are
-unchanged); `music-engine-pin.patch` applies onto `fba6e4dac`.
+unchanged); `music-engine-pin.patch` applies onto `fba6e4dac`; and
+`music-job-attribution.patch` applies onto `cbc5dee70`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -108,8 +111,8 @@ clone resolves the qualification run's tested commit as outside the
 tip's lineage and emits a different, false registry.
 
 **On today's Codexify `main` these patches are history.** #988, #997,
-#1003 and #1004 are merged, so `music-projects.patch` will refuse to
-apply (`already exists in working directory`, and the edits to
+#1003, #1004 and #1005 are merged, so `music-projects.patch` will refuse
+to apply (`already exists in working directory`, and the edits to
 `docker-compose.yml`, `guardian/core/pgdb.py` and
 `guardian/guardian_api.py` are already there). To read what landed,
 use the history rather than the patch:
@@ -118,9 +121,16 @@ use the history rather than the patch:
 git log --oneline --grep=music
 ```
 
-`music-registration-fix.patch` and `adr-108-authority-pointer.patch`
-will fail the same way now that their changes are in the tree. Once PR
-#1005 merges, `music-engine-pin.patch` will fail the same way.
+`music-registration-fix.patch`, `adr-108-authority-pointer.patch` and
+`music-engine-pin.patch` will fail the same way now that their changes
+are in the tree. `music-job-attribution.patch` is the only one still
+open, and it applies onto `cbc5dee70` -- the merge commit of #1005,
+which is `main` today.
+
+**`music-job-attribution.patch` carries `docs/qualification/registry.json`
+as text.** `docs/qualification/*.json` is marked `-diff` in
+`.gitattributes`, so a plain `git diff` renders it binary and the
+patch would not apply. `git diff --text` is what produces it.
 
 Then start the engine:
 
@@ -238,7 +248,11 @@ system_name      : 20261030-7d126d8f--pad.wav
 storage_prefix   : audio/
 ```
 
-## The engine version is part of the contract
+## The engine version is part of the contract — no longer
+
+> **Updated 2026-11-07.** The host no longer depends on it. The pin is
+> defence in depth rather than load-bearing; see the section below and
+> Codexify PR #1027.
 
 A compose is a job, and the job outlives the request that started it.
 When the host polls for the result it has to remember what it asked
@@ -248,7 +262,7 @@ carries it on the job. The route then reads it back:
 
 ```python
 # guardian/routes/music_projects.py
-raw_project_id = (result.get("context") or {}).get("project_id")
+raw_project_id = (context or {}).get("project_id")
 if not raw_project_id:
     logger.warning("[music_projects] files were produced without a "
                    "project; they will not be registered")
@@ -256,7 +270,7 @@ if not raw_project_id:
 ```
 
 That echo is the engine's, and it is why the tag in the compose service
-matters:
+mattered:
 
 | Engine | The job echoes its context |
 |---|---|
@@ -278,10 +292,16 @@ $ curl -s localhost:8002/jobs/$JOB
 The check needs no model call and no render -- a failed job still
 carries the context, so a missing one is unambiguous.
 
-**The host should not be depending on this.** It sent the context, so
-it could keep its own copy keyed by job id. That removes the coupling
-between the host's correctness and the engine's age. It is not done
-yet.
+**The host no longer depends on this.** It sent the context, so it now
+keeps its own copy keyed by job id, in its own `music_jobs` table,
+written when the job handle is minted. The service's echo is the
+fallback for a job the host never recorded, and using it is logged.
+Codexify PR #1027 carries the change; it was proven live against a
+v0.1.2 engine, where the echoed context is empty and the files are
+still attributed.
+
+The pin is still the right default. It is just no longer the only thing
+holding the attribution up.
 
 ## The one bug the review could not see
 

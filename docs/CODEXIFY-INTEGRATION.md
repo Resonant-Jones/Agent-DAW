@@ -413,7 +413,12 @@ already exists -- `AgentDeployment` / `AgentRun` / `AgentRunStep`
 the delegation drafts at `/api/delegations`
 (`guardian/routes/delegations.py:30`).
 
-### 5.1 The engine version is part of the host's contract
+### 5.1 The engine version is part of the host's contract — no longer
+
+> **Updated 2026-11-07.** The host no longer depends on it. The engine
+> version is now defence in depth rather than load-bearing, and the
+> sections below are kept because the shape of the trap is worth
+> understanding, and because the fallback it describes still exists.
 
 The async shape carries one requirement that is easy to miss, because
 nothing fails loudly when it is missing.
@@ -430,18 +435,18 @@ context = _music_context(req.project_id, req.thread_id, request_user_scope)
 output = _invoke("compose", payload, context=context, timeout=timeout)
 
 # guardian/routes/music_projects.py -- when it is polled
-raw_project_id = (result.get("context") or {}).get("project_id")
+raw_project_id = (context or {}).get("project_id")
 if not raw_project_id:
     logger.warning("[music_projects] files were produced without a "
                    "project; they will not be registered")
     return
 ```
 
-`result.get("context")` is the engine's echo of what it was given. If
-the engine does not echo it, `raw_project_id` is `None`, the
-registration is skipped, and the route still reports success. The files
-exist and nothing is registered -- the same silent failure PR #1003 was
-opened to fix, one layer up.
+`result.get("context")` was the engine's echo of what it was given. If
+the engine did not echo it, `raw_project_id` was `None`, the
+registration was skipped, and the route still reported success. The
+files existed and nothing was registered -- the same silent failure
+PR #1003 was opened to fix, one layer up.
 
 Carrying the context on the job landed in Agent-DAW **v0.1.3**
 (`6d29327`):
@@ -466,15 +471,35 @@ with the context it was given. The action does not have to succeed for
 this to be visible -- the context is on the job either way, and a
 failed job is still a job.
 
-**The host should not be depending on this at all.** It sent the
-context, so it could keep its own copy keyed by job id and never need
-the engine to remember anything. That removes the version coupling
-entirely. It is not done yet, and it is the better shape: a host that
-can lose the attribution of a job it started, because the engine it
-asked happened to be old enough, is a host that will lose it again.
+**The host no longer depends on this at all.** It sent the context, so
+it keeps its own copy keyed by job id, in its own `music_jobs` table,
+written when the job handle is minted:
 
-Until that is done, the engine version is part of the host's contract,
-and the pin in `docker-compose.yml` is not a formality.
+```python
+# guardian/routes/music_projects.py -- when the job handle is minted
+_record_job_attribution(output, context)
+
+# guardian/routes/music_projects.py -- when it is polled
+context = _attribution_for(result)   # the host's record wins
+```
+
+The service's echo is the fallback, for a job the host never recorded,
+and using it is logged so a missing record is visible rather than
+silent. This removes the version coupling: a host that could lose the
+attribution of a job it started, because the engine it asked happened to
+be old enough, would lose it again.
+
+Codexify PR **#1027** carries the change, its migration
+(`c4f7a9e2b810`) and its receipt
+(`docs/architecture/proofs/runtime/2026-11-07-host-owned-music-job-attribution.md`
+in Codexify). It was proven live against both a v0.1.6 engine and a
+v0.1.2 one: against the v0.1.2 engine the echoed context is empty, and
+the files are still attributed, because the host recorded the
+attribution itself.
+
+**The pin in `docker-compose.yml` is still the right default.** It is
+no longer the only thing holding the attribution up, and it should not
+be the only thing holding anything else up either.
 
 ---
 
@@ -554,12 +579,17 @@ system.
 - [x] `guardian/skills/music-producer/SKILL.md` -- the behaviour
 - [x] Alembic migration for the `music_projects` table
 - [x] Register artifacts as `MediaAsset` when the job finishes
+- [x] Record the job's attribution in the host's own `music_jobs` table,
+      so it does not depend on the engine echoing the context back --
+      Codexify PR #1027
 - [ ] Mount the output root into the backend at the same path the service
       writes it, or the registration cannot read the files
 - [ ] Mirror approved anchors into `VectorStore` under `project:{id}`
 - [ ] Pin the engine to **v0.1.3 or later** in the compose service.
-      v0.1.2 does not echo the job's context, so the async path produces
-      the files and registers none of them -- see section 5.1
+      v0.1.2 does not echo the job's context. This is no longer what
+      breaks the attribution -- the host keeps its own copy now -- but
+      the echo is the fallback for a job the host never recorded, and
+      the pin is still the right default. See section 5.1
 
 **In Codexify, for path B (service plugin):**
 
@@ -704,3 +734,5 @@ PostgreSQL, and reverting only the route to `main` fails all five.
 
 With the fix, the same live chain reports **7 of 7 registered, 0 failing
 checks**.
+
+

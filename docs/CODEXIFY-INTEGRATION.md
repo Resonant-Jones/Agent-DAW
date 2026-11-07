@@ -689,6 +689,15 @@ system.
   underlying defect is that the local-node resolution is ambiguous when
   two nodes share a `created_at`, and that is a change to the messaging
   service, not to whatever you were doing.
+
+  **Fixed, in its own pull request: Codexify PR #1039.** The local node is
+  now *identified* by an `is_local` flag rather than inferred from being
+  the oldest row, and a partial unique index
+  (`UNIQUE (is_local) WHERE is_local IS TRUE`) admits at most one local
+  row. The migration is behaviour-preserving -- it backfills the *oldest*
+  row, which is exactly the row the old resolver returned -- so no existing
+  deployment changes behaviour. The same test run forty times after the
+  change: **0 failures**. Until that lands, the advice above still stands.
 - **Touching the qualified surface invalidates the qualification
   registry.** `docker-compose.yml`, `config/**`, `guardian/**`,
   `frontend/**`, `plugins/**`, `codex_runner/**` and the root package

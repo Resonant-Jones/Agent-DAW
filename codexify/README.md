@@ -37,7 +37,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
 | `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, merged 2026-11-07. Applies onto `fba6e4dac` |
-| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `cbc5dee70` |
+| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `cbc5dee70`. Carries the proof harnesses too, so the receipt can be reproduced |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |

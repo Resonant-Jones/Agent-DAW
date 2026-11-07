@@ -40,6 +40,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `cbc5dee70`. Carries the proof harnesses too, so the receipt can be reproduced |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
+| `guardian/db/migrations/versions/c4f7a9e2b810_add_music_jobs_table.py` | New: the Alembic migration for the host's own record of a music job's attribution |
 | `config/supported_profiles/v1-music-producer.yaml` | New: a supported profile that enables the route |
 | `plugins/agentdaw/manifest.json` | New: what Codexify advertises the service as |
 | `guardian/skills/music-producer/SKILL.md` | New: the conduct |

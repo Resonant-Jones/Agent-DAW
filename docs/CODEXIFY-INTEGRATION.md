@@ -698,6 +698,25 @@ system.
   row, which is exactly the row the old resolver returned -- so no existing
   deployment changes behaviour. The same test run forty times after the
   change: **0 failures**. Until that lands, the advice above still stands.
+
+  **Adding a column that current service code queries breaks Codexify's
+  migration proofs.** The first CI run of PR #1039 failed `Backend Tests` at
+  `tests/migration/test_message_request_postgres.py::test_postgres_migration_and_concurrent_consent`
+  with `UndefinedColumn: column threadspace_nodes.is_local does not exist`.
+  That test pins the revision `8d41a0c2b7ef` -- a hundred behind the head --
+  and runs the *current* messaging service against it, so a column the service
+  selects must exist at that revision or the proof cannot run. Two traps in
+  fixing it: repinning the test to a revision after the new migration destroys
+  what the test proves (it exists to show the message-request migration is
+  behaviour-preserving from `8d41a0c2b7ef`), and inserting the migration into
+  the graph before that revision rewrites a shipped revision's `down_revision`,
+  which a deployment that already applied it would skip. The route taken keeps
+  the test's meaning and the graph intact: the fixture applies the new
+  migration's **own module** to the pinned schema
+  (`MigrationContext` + `Operations.context`), so the DDL is not copied, and
+  asserts both that the pinned revision predates the marker and that the
+  marker was applied. Measured blast radius, branch against pristine `main`:
+  **one** test of the whole `tests/migration` suite.
 - **Touching the qualified surface invalidates the qualification
   registry.** `docker-compose.yml`, `config/**`, `guardian/**`,
   `frontend/**`, `plugins/**`, `codex_runner/**` and the root package

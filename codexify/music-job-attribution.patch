@@ -5,7 +5,7 @@
 # dated receipt, the qualification-registry regeneration the change
 # requires, a dated note on ADR-108, and the two proof harnesses.
 #
-# Apply onto ad1fc651a, or onto any later commit that has not changed
+# Apply onto eb4c8e20b, or onto any later commit that has not changed
 # guardian/routes/music_projects.py, guardian/core/pgdb.py,
 # guardian/db/models.py, guardian/db/migrations/versions/**,
 # docs/architecture/00-current-state.md, docs/architecture/README.md,
@@ -25,29 +25,32 @@
 # service's echo is the logged fallback. A refused write does not fail
 # the compose.
 #
-# The branch merges main twice, because main moved under it twice. The
-# first merge follows PR #1028, which removed the tip-dependent path
-# counts from 00-current-state.md; it resolves in that change's favour
-# for every count sentence and keeps this branch's own edits -- the
-# published Alembic head, the two sentences about the live Preview
-# database, and the Music Producer bullet. One count that PR #1028 left
-# behind is put into the same numeral-free form. The second merge
-# follows PR #1029's rewrite of 00-current-state.md and the weekly
-# refresh ad1fc651a; it resolves on that rewrite and re-applies exactly
-# four edits -- the published head, the two Preview sentences, and the
-# Music Producer bullet.
+# The branch merges main three times, because main moved under it three
+# times. The first merge follows PR #1028, which removed the
+# tip-dependent path counts from 00-current-state.md; it resolves in
+# that change's favour for every count sentence and keeps this branch's
+# own edits -- the published Alembic head, the two sentences about the
+# live Preview database, and the Music Producer bullet. One count that
+# PR #1028 left behind is put into the same numeral-free form. The
+# second merge follows PR #1029's rewrite of 00-current-state.md and
+# the weekly refresh ad1fc651a; it resolves on that rewrite and
+# re-applies exactly four edits -- the published head, the two Preview
+# sentences, and the Music Producer bullet. The third merge follows
+# PR #1014, PR #1017 and PR #1030; it resolves on main's side, keeps
+# those same four edits, and regenerates the qualification registry at
+# the merged tip.
 #
-# The last hunk is not this branch's substance. The weekly refresh
+# One hunk is not this branch's substance. The weekly refresh
 # ad1fc651a dropped two obligations that the repository's own contracts
 # require: the non-promotion rule in "Not yet true / do not assume" and
 # any mention of the supported-compose qualification in "Active
-# blockers". main is red on both at that commit (Architecture Contracts
-# fails there with 68 failures); main's Backend Tests job did not notice
-# only because a documentation-only change leaves run_backend false, so
-# the pytest step never ran. This branch touches guardian/, so the job
-# does run and it surfaced the second assertion. The defect is main's and
-# the exposure is this branch's, and it is repaired here rather than
-# excused -- in its own commit, so that it can be read separately.
+# blockers". main was red on both at that commit -- Architecture
+# Contracts failed there with 68 failures -- and main's Backend Tests
+# job did not notice only because a documentation-only change leaves
+# run_backend false, so the pytest step never ran. PR #1030 carries the
+# repair onto main, merged as f5d89dbbc5; its copy and this branch's
+# copy (a540d4392) restore byte-identical sentences, so this branch's
+# merge of main collapsed them into one with no conflict.
 #
 # docs/qualification/registry.json is in this patch because
 # guardian/routes/**, guardian/core/**, guardian/db/models.py and
@@ -62,7 +65,7 @@
 # binary; `git diff --text` is what produces this patch.
 #
 diff --git a/docs/architecture/00-current-state.md b/docs/architecture/00-current-state.md
-index fe392b8d3..25f5bcf53 100644
+index 44771238a..25f5bcf53 100644
 --- a/docs/architecture/00-current-state.md
 +++ b/docs/architecture/00-current-state.md
 @@ -22,11 +22,11 @@ Every runtime or implementation claim below is stated against `origin/main` only
@@ -93,25 +96,8 @@ index fe392b8d3..25f5bcf53 100644
  - Saved Widget **promotion and revision storage** exist on `main` behind `CODEXIFY_ENABLE_SAVED_WIDGET_ROUTES`. This is a promotion and revision-storage slice only, not a qualified widget lifecycle.
  - `direct_messages` is mounted `internal_only` on the supported profile. Share links remain bearer credentials: `expires_in_days` is optional on creation and no revocation endpoint exists.
  - Recipient-local read state is deployed and live-qualified on the Private Preview: a two-account live test passed 20 of 20 checks, re-run against the merged mainline. The unread badge is browser-rendered and proven in Chrome 156 on one browser only.
-@@ -60,6 +60,7 @@ Since the 2026-11-06 audit (`acd22095`), `main` took 72 commits, 39 of them non-
- 
- ## Not yet true / do not assume
- 
-+- Capabilities without current-main qualification are not default Beta support.
- - **Do not read any qualification surface as current.** `supported-compose` and `supported-compose-stock` are both `PASS` but both `stale`; `onboarding-and-people` and `release-readiness-gates` have no run receipt at all. Qualification is commit-bound, and a green receipt does not travel forward.
- - **Do not read one qualified surface as a qualified release.** A receipt for one surface does not qualify another, and a proof artifact the registry cannot read does not qualify it either. The release gate remains `HOLD`.
- - **Do not read the eight-gate rubric or its harness as a qualification.** The rubric fixes the judgement rules in advance — UNPROVEN is not PASS, and a gate not exercised at the run's own revision is UNPROVEN — and the harness self-test passes 54/54, but no integrated run against a frozen tip has been executed. The harness report states plainly that no gate reached PASS.
-@@ -75,7 +76,7 @@ Since the 2026-11-06 audit (`acd22095`), `main` took 72 commits, 39 of them non-
- 
- ## Active blockers
- 
--- **No tracked qualification surface is `current` against this tip.** Both `PASS` surfaces are `stale` and both `HOLD` surfaces have no receipt. The re-qualification that would restore `current` for the stock surface is the outstanding release-lane work.
-+- **No tracked qualification surface is `current` against this tip.** Both `PASS` surfaces are `stale` and both `HOLD` surfaces have no receipt. The re-qualification that would restore `current` for the stock surface is the outstanding release-lane work, and the supported-compose qualification against this tip is missing: a qualification is commit-bound, so no supported-compose qualification describes the current tip.
- - `onboarding-and-people` has no qualification run receipt at all, so the registry reports `HOLD` on absent evidence. **It needs two independent non-developer testers; no agent-run can close it.**
- - **The eight-gate integrated run has not been executed.** The rubric and harness exist and are self-tested; the run against one frozen tip, isolated from the Private Preview, is what remains.
- - **The host killed Docker Desktop under memory pressure on 2026-11-07**, taking the Preview's containers and a concurrent proof with it. The pause precondition is now recorded, but a heavy run beside a live Preview on this host is the condition that killed the VM.
 diff --git a/docs/architecture/README.md b/docs/architecture/README.md
-index b1f3d13f5..342ce0560 100644
+index f5df78ff4..259334821 100644
 --- a/docs/architecture/README.md
 +++ b/docs/architecture/README.md
 @@ -69,6 +69,7 @@ Codexify is a local-first chat and knowledge workspace built around a FastAPI ba
@@ -342,15 +328,15 @@ index 000000000..cc2da21b7
 +  host's ownership of the attribution; the ADR's substance and its `Proposed`
 +  status are unchanged.
 diff --git a/docs/qualification/registry.json b/docs/qualification/registry.json
-index e6d05d02c..dd3dae600 100644
+index e5ff8083c..a9a2e8e9d 100644
 --- a/docs/qualification/registry.json
 +++ b/docs/qualification/registry.json
 @@ -49,7 +49,7 @@
      },
      "supported-compose": {
        "blockers": [
--        "The tested commit no longer describes the current tip: 23 path(s) in this qualification surface changed since the run.",
-+        "The tested commit no longer describes the current tip: 24 path(s) in this qualification surface changed since the run.",
+-        "The tested commit no longer describes the current tip: 28 path(s) in this qualification surface changed since the run.",
++        "The tested commit no longer describes the current tip: 29 path(s) in this qualification surface changed since the run.",
          "1 earlier run receipt(s) for this surface were superseded by a later run."
        ],
        "evidence": [
@@ -358,8 +344,8 @@ index e6d05d02c..dd3dae600 100644
      },
      "supported-compose-stock": {
        "blockers": [
--        "The tested commit no longer describes the current tip: 28 path(s) in this qualification surface changed since the run.",
-+        "The tested commit no longer describes the current tip: 32 path(s) in this qualification surface changed since the run.",
+-        "The tested commit no longer describes the current tip: 43 path(s) in this qualification surface changed since the run.",
++        "The tested commit no longer describes the current tip: 47 path(s) in this qualification surface changed since the run.",
          "1 earlier run receipt(s) for this surface were superseded by a later run."
        ],
        "evidence": [

@@ -37,7 +37,7 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `music-registration-fix.patch` | The unified diff of PR #1003 -- the artifact-registration fix, merged 2026-11-05. Applies onto `68c9e523` |
 | `adr-108-authority-pointer.patch` | The unified diff of PR #1004 -- the ADR-108 authority pointer, merged 2026-11-05. Applies onto `68c9e523` |
 | `music-engine-pin.patch` | The unified diff of PR #1005 -- the engine pin, merged 2026-11-07. Applies onto `fba6e4dac` |
-| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `ad1fc651a`. Carries the proof harnesses too, so the receipt can be reproduced |
+| `music-job-attribution.patch` | The unified diff of PR #1027 -- the host-owned job attribution, still open. Applies onto `eb4c8e20b`. Carries the proof harnesses too, so the receipt can be reproduced |
 | `guardian/routes/music_projects.py` | New: the route, the forwarding, and the artifact registration |
 | `guardian/db/migrations/versions/a7d4c9e2f1b3_add_music_projects_table.py` | New: the Alembic migration |
 | `guardian/db/migrations/versions/c4f7a9e2b810_add_music_jobs_table.py` | New: the Alembic migration for the host's own record of a music job's attribution |
@@ -60,14 +60,14 @@ diffs, so the tree they were cut against is part of the artifact:
 | `music-registration-fix.patch` | `68c9e523` | the commit PR #1003 was cut from |
 | `adr-108-authority-pointer.patch` | `68c9e523` | the commit PR #1004 was cut from |
 | `music-engine-pin.patch` | `fba6e4dac` | the commit PR #1005 was cut from |
-| `music-job-attribution.patch` | `ad1fc651a` | the commit PR #1027 was rebased onto after main moved under it a second time |
+| `music-job-attribution.patch` | `eb4c8e20b` | the commit PR #1027 merged after main moved under it a third time |
 
 Those bases were checked with `git apply --check` against clean
 checkouts of each commit, not assumed. `music-projects.patch` applies
 onto `74fd8f48` and onto nothing else; the two at `68c9e523` also
 apply onto `40c96c8f` (its parent, where the same files are
 unchanged); `music-engine-pin.patch` applies onto `fba6e4dac`; and
-`music-job-attribution.patch` applies onto `ad1fc651a`.
+`music-job-attribution.patch` applies onto `eb4c8e20b`.
 
 To apply the whole thing onto the state before any of the music work
 landed:
@@ -125,18 +125,22 @@ git log --oneline --grep=music
 `music-registration-fix.patch`, `adr-108-authority-pointer.patch` and
 `music-engine-pin.patch` will fail the same way now that their changes
 are in the tree. `music-job-attribution.patch` is the only one still
-open, and it applies onto `ad1fc651a` -- `main`'s current tip, the
-weekly current-state refresh.
+open, and it applies onto `eb4c8e20b` -- the `main` tip the branch
+merges, which carries PR #1014, PR #1017 and PR #1030. It also applies
+onto the `main` tips after it, which add only Task Spec documents.
 
 **One hunk in `music-job-attribution.patch` is not the music change.**
 The weekly refresh `ad1fc651a` dropped two obligations that Codexify's
 own contracts require: the non-promotion rule in `00-current-state.md`'s
 `Not yet true / do not assume` section, and any mention of the
 `supported-compose` qualification in its `Active blockers` section.
-`main` is red on both at that commit -- Architecture Contracts fails
+`main` was red on both at that commit -- Architecture Contracts failed
 there with 68 failures -- and `main`'s Backend Tests job did not notice
 only because a documentation-only change leaves `run_backend` false, so
-the pytest step never ran. PR #1027 touches `guardian/`, so the job does
+the pytest step never ran. PR #1030 carries the repair onto `main`
+(merged as `f5d89dbbc5`); its copy and PR #1027's copy restore
+byte-identical sentences, so the branch's merge of `main` collapsed them
+into one with no conflict. PR #1027 touches `guardian/`, so the job does
 run and it surfaced the second assertion. The patch carries the repair
 in its own commit, so it can be read separately from the music change.
 

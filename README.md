@@ -26,7 +26,7 @@ Slice 1 is built and working end to end:
 | Measurement pass (BS.1770 loudness, spectral, band, stereo) | done, cross-validated against ffmpeg |
 | Producer LLM adapter (anthropic / chat-completions / gemini) | done, live against MiniMax |
 | Patch library + retrieval anchors + delta revisions | done |
-| Codexify client: service layer, FastAPI router, skill | done, not yet mounted in Codexify |
+| Codexify client: service layer, FastAPI router, skill | done, mounted in Codexify behind the `v1-music-producer` profile |
 | Generative audio adapters (Stable Audio 3.0, Lyria 3) | written, **no API key exercised yet** |
 | Multi-agent producer with delegated roles | not started |
 
@@ -427,12 +427,17 @@ are quarantined), add the compose service, and copy the skill into
 - **Stable Audio and Lyria are untested against their live APIs.** No key
   is configured. The request shapes follow the published docs; the
   response handling has not been exercised.
-- **The Codexify client is not mounted.** The service layer, the router
-  and the skill exist and are tested here, but nothing in Codexify calls
-  them yet. That is a PR against Codexify, not a change to this repo —
-  see `docs/CODEXIFY-INTEGRATION.md` for the exact wiring and the
-  supported-profile gotcha that will silently quarantine the routes if
-  it is missed.
+- **The Codexify client is mounted, but behind a quarantining profile.** The
+  service layer, the router and the skill exist here and are tested, and
+  Codexify calls them: the route landed in PR #988, the artifact
+  registration was fixed in #1003, the engine pin in #1005, and the host's
+  ownership of the job attribution in #1027. What is *not* true is that this
+  is a supported path — the `music_projects` route label is not in the
+  default profile's route posture and is reachable only under
+  `v1-music-producer`, which is not a qualified supported path. See
+  `docs/CODEXIFY-INTEGRATION.md` for the wiring and the supported-profile
+  gotcha that will silently quarantine the routes if it is missed, and
+  `docs/DECISIONS.md` for the decisions that are settled.
 - **One instrument.** The engine is subtractive only. A sample-based or
   FM path would widen the palette.
 - **The Producer is a single agent.** Delegated roles (patch designer,

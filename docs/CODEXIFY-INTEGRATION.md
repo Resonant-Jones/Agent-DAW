@@ -12,6 +12,11 @@ references are `path:line`.
 adapter ships inside Agent-DAW; the Codexify-side wiring is a small PR
 against Codexify's own review process.
 
+The settled decisions -- what the REAPER handoff is, where the popup
+lives, and how ADR-108 is treated -- are in
+[`DECISIONS.md`](./DECISIONS.md). Section 10 below states the popup
+contract.
+
 ---
 
 ## 1. The mapping, and why it is almost entirely reuse
@@ -736,3 +741,70 @@ With the fix, the same live chain reports **7 of 7 registered, 0 failing
 checks**.
 
 
+---
+
+## 10. The popup contract
+
+> Recorded 2026-11-07 as decision **D2** in [`DECISIONS.md`](./DECISIONS.md).
+> This section states what the contract has to be. It is not implemented,
+> and the reason is at the end.
+
+There is no dedicated Agent-DAW user interface. The interface is the
+existing Guardian Chat, rendered in the Codexify frontend as a popup modal
+that floats over the DAW, and REAPER launches it.
+
+Every message lands in a thread in a project in the main harness. **The
+popup is a projection over established structure, not a second chat
+surface.** Opening it from REAPER and opening it from the Codexify app
+show the same thread, and the words the Artist said are written once, to
+the thread that already exists.
+
+### What the Codexify frontend has to serve
+
+A route that renders the Guardian Chat as a modal overlay, addressed by
+thread. Today the Codexify chat is selected in application state rather
+than by URL, so no such route exists and one has to be built.
+
+It needs to accept, at minimum:
+
+| Parameter | Why |
+|---|---|
+| the thread id | which conversation to project |
+| the project id | which project the popup belongs to, for the asset list and the chat header |
+| a modal flag | so the route renders the overlay rather than the full app shell |
+
+The names are Codexify's to choose. This repository does not invent a
+route in someone else's application, and a patch that hard-codes a guessed
+path would be a patch that has to be rewritten when the other side names
+it differently.
+
+### What the launcher has to do
+
+Open a browser window at that URL. Nothing more.
+
+It must not poll Codexify for state, and it must not hold a session open.
+A REAPER action that polls the host would make the two applications
+interdependent, which is exactly what decision **D1** rules out on the
+other side of the same handoff. The launcher opens a window and gets out
+of the way; the window talks to the host itself.
+
+The launcher belongs with the ReaPack bundle in the Studio v1 harness,
+which is not built. REAPER is also unlicensed on the development machine,
+so an action could not be run here even if it were written -- it would be
+structurally validated, not verified.
+
+### What is not decided, and why nothing is shipped for it
+
+| Piece | Owner | State |
+|---|---|---|
+| The overlay route and its parameter names | Codexify | Does not exist |
+| The launcher action, and its packaging | Agent-DAW / Studio v1 | Not built; the harness is not built |
+| The URL the launcher opens | Codexify | The host names it |
+
+Both remaining pieces are decisions belonging to a side that has not made
+them. Writing either now would encode somebody else's naming choice, and
+the result would be code that exists only to be rewritten.
+
+**Honest scope: the decision is recorded, the contract is stated, and the
+implementation waits on a Codexify-side route and the Studio v1 harness.**
+It is not "almost done" -- it is a decision with its prerequisites named.

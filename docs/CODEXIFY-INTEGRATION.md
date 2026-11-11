@@ -807,6 +807,34 @@ PostgreSQL, and reverting only the route to `main` fails all five.
 With the fix, the same live chain reports **7 of 7 registered, 0 failing
 checks**.
 
+- **A self-check that compares a live computation against a pinned literal
+  is a false failure waiting for the next migration.** Codexify's eight-gate
+  self-check asserted that the harness computes the checkout's single Alembic
+  head from its source, and compared the harness's answer against a pinned
+  revision literal. The harness reads the head at run time; the literal does
+  not. At the next migration the check reported **53 of 54** while the
+  harness under test was reading the real head correctly. `main` diagnosed it
+  correctly -- the defect was in the self-test, not the harness -- and
+  `00-current-state.md` recorded it honestly, but the remedy it named
+  ("re-pin to the resolved head") would have failed again at the following
+  migration.
+
+  The fix computes the expected head from the migration source instead,
+  **independently of the harness** -- reading each revision file's own
+  `revision` and `down_revision` declarations, with no Alembic and no
+  `alembic.ini`, so the two computations share no failure mode.
+
+  The trap in the obvious fix is worth stating: deriving the expected value
+  from the harness's *own* function would never go stale, but it would also
+  agree with a harness that computed the wrong head, and the check would
+  pass. **Two independent computations can disagree; one cannot.** The
+  mutation proof in `scripts/proofs/mutate_eight_gate_head_check.py` covers
+  both halves -- it shows the check still fails when the harness computes the
+  wrong head, and that a superseding revision moves the expected head with
+  it.
+
+  Codexify PR #1056.
+
 
 ---
 

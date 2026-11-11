@@ -46,6 +46,17 @@ returns a job handle and the caller polls `/api/music/jobs/{job_id}`.
 | `guardian/skills/music-producer/SKILL.md` | New: the conduct |
 | `tests/routes/test_music_projects.py` | New: the tests |
 
+**The staged copies are the versions that shipped.** Every file in the
+staged tree above is byte-identical to its counterpart on Codexify `main`
+at `0efe00cd48e00bda90b100544f9a9f859e11b2d8`, verified file by file
+rather than by eye. The route and its test were re-staged on 2026-11-11
+because they had been left at their pre-#1027 content: the host-owned job
+attribution that PR #1027 landed was present in the *patch* but absent
+from the staged *source*, so the directory claimed to record what landed
+while showing something that had not. Main's copies of those two files
+have not moved since #1027 landed as `3394a370ef`, so re-staging them
+carries no later drift.
+
 The compose service and the `guardian_api.py` mount are in the patch.
 
 ## How to apply it

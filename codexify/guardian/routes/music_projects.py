@@ -166,7 +166,84 @@ def _invoke(
             detail=error.get("message") or "the music service reported an error",
         )
 
-    return body.get("output") or {}
+    output = body.get("output") or {}
+    # A job handle is minted here, and this is the one place the host
+    # knows what it belongs to. Recording it now is what lets the
+    # attribution survive an engine that does not echo the context back.
+    _record_job_attribution(output, context)
+    return output
+
+
+def _record_job_attribution(
+    output: Dict[str, Any],
+    context: Optional[Dict[str, Any]],
+) -> None:
+    """Keep the host's own copy of which project a job belongs to.
+
+    The host sent the context, so it knows the answer already; keeping
+    a copy means the attribution does not depend on the service echoing
+    the context back. An engine that does not echo it used to produce
+    files the host could not place, and the host reported success
+    anyway -- files produced, none registered.
+
+    The write is best effort. If it fails the files are still worth
+    producing, so the failure is logged and swallowed: the Artist's
+    music exists either way.
+    """
+    job_id = (output or {}).get("job_id")
+    if not job_id:
+        return
+
+    context = context or {}
+    raw_project_id = context.get("project_id")
+    if not raw_project_id:
+        return
+    try:
+        project_id = int(raw_project_id)
+    except (TypeError, ValueError):
+        logger.warning(
+            "[music_projects] work carried a non-numeric project id; the "
+            "job was not attributed"
+        )
+        return
+
+    db = chatlog_db
+    if db is None:
+        logger.warning(
+            "[music_projects] no database is configured; job %s was not "
+            "attributed",
+            job_id,
+        )
+        return
+
+    try:
+        db.record_music_job(
+            str(job_id),
+            project_id=project_id,
+            thread_id=_thread_id_from_context(context),
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[music_projects] could not attribute job %s to project %s: %s",
+            job_id,
+            project_id,
+            exc,
+        )
+
+
+def _thread_id_from_context(context: Dict[str, Any]) -> Optional[int]:
+    """The thread a job belongs to, or None.
+
+    A thread that is not there is dropped rather than allowed to fail
+    the registration; the project is what the row needs.
+    """
+    raw_thread_id = (context or {}).get("thread_id")
+    if not raw_thread_id:
+        return None
+    try:
+        return int(raw_thread_id)
+    except (TypeError, ValueError):
+        return None
 
 
 # --------------------------------------------------------------------------
@@ -459,9 +536,59 @@ def _register_finished_artifacts(
         return
     _register_artifacts_from(
         result.get("output") or {},
-        result.get("context") or {},
+        _attribution_for(result),
         scope,
     )
+
+
+def _host_job_record(job_id: Optional[str]) -> Optional[Dict[str, Any]]:
+    """The host's own record of a job, or None.
+
+    A database that cannot answer is treated as having no record rather
+    than as an error: the fallback below still attributes the files, and
+    the warning makes the missing record visible.
+    """
+    if not job_id:
+        return None
+    db = chatlog_db
+    if db is None:
+        return None
+    try:
+        return db.get_music_job(str(job_id))
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "[music_projects] could not read the record of job %s: %s",
+            job_id,
+            exc,
+        )
+        return None
+
+
+def _attribution_for(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Which project and thread a finished job belongs to.
+
+    The host's own record wins: it was written from the context the
+    host sent, so it is the answer the host gave rather than one it
+    read back. The context the service echoed is the fallback for a job
+    the host never recorded, and it is logged when it is used, so a
+    missing host record is visible instead of silent.
+    """
+    job_id = (result or {}).get("job_id")
+    record = _host_job_record(job_id)
+    if record is not None:
+        context: Dict[str, Any] = {"project_id": str(record["project_id"])}
+        if record.get("thread_id") is not None:
+            context["thread_id"] = str(record["thread_id"])
+        return context
+
+    context = (result or {}).get("context") or {}
+    if context.get("project_id"):
+        logger.warning(
+            "[music_projects] job %s was not recorded by the host; falling "
+            "back to the context the service echoed",
+            job_id,
+        )
+    return context
 
 
 def _music_target_is_real(project_id: int, thread_id: Optional[int]) -> bool:
@@ -496,9 +623,9 @@ def _register_artifacts_from(
     """Turn the produced files into the host's own asset rows.
 
     The service produced the files; the host owns how they are named and
-    stored, so the registration happens here and not there. The job
-    carries the context it was started with, which is how the files are
-    attributed to the project and thread that asked for them.
+    stored, so the registration happens here and not there. The context
+    is the attribution the host resolved for the job -- its own record
+    where there is one, the service's echo otherwise.
 
     A failure to register is logged and swallowed: the Artist's music
     exists either way, and a job that succeeded must not be reported as
@@ -522,20 +649,14 @@ def _register_artifacts_from(
         logger.warning("[music_projects] work carried a non-numeric project id")
         return
 
-    thread_id = None
-    raw_thread_id = (context or {}).get("thread_id")
-    if raw_thread_id:
-        try:
-            thread_id = int(raw_thread_id)
-        except (TypeError, ValueError):
-            thread_id = None
-        if thread_id is not None and not _music_target_is_real(project_id, thread_id):
-            logger.warning(
-                "[music_projects] thread %s is not there; registering the "
-                "files against the project without it",
-                thread_id,
-            )
-            thread_id = None
+    thread_id = _thread_id_from_context(context or {})
+    if thread_id is not None and not _music_target_is_real(project_id, thread_id):
+        logger.warning(
+            "[music_projects] thread %s is not there; registering the "
+            "files against the project without it",
+            thread_id,
+        )
+        thread_id = None
 
     user_id = getattr(scope, "user_id", None)
     try:
@@ -708,10 +829,32 @@ def register_artifacts(
     a file *is*; the host owns the rules for naming and storing it, and
     duplicating those rules would let them drift.
 
+    Three things this has to get right, because each of them fails
+    silently:
+
+    - **The row survives.** The session is a plain SQLAlchemy Session:
+      closing it rolls back anything uncommitted, so the row has to be
+      committed here or it never existed.
+    - **The identity is stable.** The host reads the bytes, so it hashes
+      them itself. Trusting the Producer's hash would let a wrong hash
+      become the row's identity, and two registrations of the same file
+      would then become two rows.
+    - **Registration is idempotent.** A job can be polled more than
+      once. The second poll must reuse the row the first one wrote, not
+      collide with it.
+
+    One artifact that cannot be registered does not cost the Artist the
+    others, so each is registered on its own.
+
     Returns one row per registered artifact, with the asset id.
     """
     from guardian.db.models import MediaAsset
-    from guardian.services.media_identity import compute_identity, utcnow
+    from guardian.services.media_identity import (
+        compute_content_hash,
+        compute_identity,
+        find_existing_asset,
+        utcnow,
+    )
 
     if not artifacts:
         return []
@@ -728,63 +871,117 @@ def register_artifacts(
         media_kind = str(artifact.get("media_kind") or "other")
         if media_kind not in {"document", "image", "audio", "video", "other"}:
             media_kind = "other"
+        provenance = str(artifact.get("provenance") or "generated")
 
         file_data = path.read_bytes()
+        # The host owns the identity, so the host hashes the bytes it just
+        # read. The Producer's hash is a claim about them; if it disagrees
+        # with the bytes in front of us, the bytes win.
+        content_hash = compute_content_hash(file_data)
+        reported_hash = artifact.get("content_hash")
+        if reported_hash and reported_hash != content_hash:
+            logger.warning(
+                "[music_projects] %s reported hash %s but hashes to %s; "
+                "the host's own hash is the identity",
+                path.name,
+                str(reported_hash)[:12],
+                content_hash[:12],
+            )
+
         identity = compute_identity(
             file_data=file_data,
             media_kind=media_kind,
-            provenance=str(artifact.get("provenance") or "generated"),
+            provenance=provenance,
             human_label=path.stem,
             original_filename=path.name,
             mime_type=artifact.get("mime_type"),
             first_seen_at=utcnow(),
-            content_hash=artifact.get("content_hash"),
+            content_hash=content_hash,
         )
 
-        asset = MediaAsset(
-            id=str(uuid.uuid4()),
-            project_id=project_id,
-            thread_id=thread_id,
-            user_id=user_id,
-            media_kind=media_kind,
-            provenance=str(artifact.get("provenance") or "generated"),
-            source_tag="agentdaw",
-            content_hash=identity.content_hash,
-            deterministic_id=identity.deterministic_id,
-            normalized_slug=identity.normalized_slug,
-            system_name=identity.system_name,
-            storage_prefix=identity.storage_prefix,
-            src_url=path.as_uri(),
-            mime_type=artifact.get("mime_type"),
-            filesize=artifact.get("bytes"),
-            # The column is NOT NULL with a flush-time default. Writing it
-            # explicitly means the row is complete the moment it is
-            # constructed, rather than depending on when the session
-            # happens to flush it.
-            import_lineage=[],
-        )
+        try:
+            with db.get_session() as session:
+                existing = find_existing_asset(
+                    session,
+                    project_id=project_id,
+                    media_kind=media_kind,
+                    provenance=provenance,
+                    content_hash=content_hash,
+                )
+                if existing is not None:
+                    # The same bytes are already this project's asset of
+                    # this kind. The identity is the same fact, so this is
+                    # the same row -- not a second one.
+                    registered.append(
+                        {
+                            "asset_id": existing.id,
+                            "role": artifact.get("role"),
+                            "media_kind": media_kind,
+                            "mime_type": artifact.get("mime_type"),
+                            "bytes": artifact.get("bytes"),
+                            "content_hash": content_hash,
+                            "deterministic_id": existing.deterministic_id,
+                            "system_name": existing.system_name,
+                            "storage_prefix": existing.storage_prefix,
+                        }
+                    )
+                    continue
 
-        with db.get_session() as session:
-            session.add(asset)
-            session.flush()
-            # The session is a plain SQLAlchemy Session: closing it rolls
-            # back anything uncommitted, so the row has to be committed
-            # here or it never existed. The flush alone would let this
-            # function report a registration that did not happen.
-            session.commit()
+                asset = MediaAsset(
+                    id=str(uuid.uuid4()),
+                    project_id=project_id,
+                    thread_id=thread_id,
+                    user_id=user_id,
+                    media_kind=media_kind,
+                    provenance=provenance,
+                    source_tag="agentdaw",
+                    content_hash=content_hash,
+                    deterministic_id=identity.deterministic_id,
+                    normalized_slug=identity.normalized_slug,
+                    system_name=identity.system_name,
+                    storage_prefix=identity.storage_prefix,
+                    src_url=path.as_uri(),
+                    mime_type=artifact.get("mime_type"),
+                    filesize=artifact.get("bytes"),
+                    # The column is NOT NULL with a flush-time default. Writing it
+                    # explicitly means the row is complete the moment it is
+                    # constructed, rather than depending on when the session
+                    # happens to flush it.
+                    import_lineage=[],
+                )
 
-        registered.append(
-            {
-                "asset_id": asset.id,
-                "role": artifact.get("role"),
-                "media_kind": media_kind,
-                "mime_type": artifact.get("mime_type"),
-                "bytes": artifact.get("bytes"),
-                "content_hash": identity.content_hash,
-                "deterministic_id": identity.deterministic_id,
-                "system_name": identity.system_name,
-                "storage_prefix": identity.storage_prefix,
-            }
-        )
+                session.add(asset)
+                session.flush()
+                # Read the id while the session still holds the instance.
+                # Committing expires the instance's attributes, and a
+                # closed session cannot refresh them -- so reading it
+                # afterwards raises instead of returning the id.
+                asset_id = asset.id
+                # The flush alone would let this function report a
+                # registration that did not happen.
+                session.commit()
+
+                registered.append(
+                    {
+                        "asset_id": asset_id,
+                        "role": artifact.get("role"),
+                        "media_kind": media_kind,
+                        "mime_type": artifact.get("mime_type"),
+                        "bytes": artifact.get("bytes"),
+                        "content_hash": content_hash,
+                        "deterministic_id": identity.deterministic_id,
+                        "system_name": identity.system_name,
+                        "storage_prefix": identity.storage_prefix,
+                    }
+                )
+        except Exception as exc:  # noqa: BLE001
+            # The Artist's music exists whether or not a row was written,
+            # and one file that will not register does not cost the
+            # Artist the rest of the session.
+            logger.warning(
+                "[music_projects] could not register %s: %s",
+                path.name,
+                exc,
+            )
 
     return registered
